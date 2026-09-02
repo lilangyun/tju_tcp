@@ -71,6 +71,7 @@ tju_tcp_t* tju_accept(tju_tcp_t* listen_sock){
     local_addr.ip = listen_sock->bind_addr.ip;  //具体的IP地址
     local_addr.port = listen_sock->bind_addr.port;  //端口
 
+    // 建立连接后，修改
     new_conn->established_local_addr = local_addr;
     new_conn->established_remote_addr = remote_addr;
 
@@ -105,11 +106,35 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     local_addr.port = 5678; // 连接方进行connect连接的时候 内核中是随机分配一个可用的端口
     sock->established_local_addr = local_addr;
 
+    // 三次握手
+    // 发送SYN
+    char* msg;
+    uint32_t seq = 464;  // 应改为随机值
+    uint16_t plen = DEFAULT_HEADER_LEN;  // 无payload
+    msg = create_packet_buf(local_addr.port, target_addr.port, seq, 0, 
+              DEFAULT_HEADER_LEN, plen, SYN_FLAG_MASK, 1, 0, NULL, 0);
+    sendToLayer3(msg, plen);
+    sock->state = SYN_SENT;
+
+    // 监听端口
+    int hashval = cal_hash(local_addr.ip, local_addr.port, 0, 0);
+    listen_socks[hashval] = sock;
+
+    // 接收SYN + ACK
+    while (sock->state != ESTABLISHED){
+        // 阻塞
+    }
+
+    // 发送ACK
+    msg = create_packet_buf(local_addr.port, remote_addr.port, seq, 0, 
+              DEFAULT_HEADER_LEN, plen, ACK_FLAG_MASK, 1, 0, NULL, 0);
+    sendToLayer3(msg, plen);
+
     // 这里也不能直接建立连接 需要经过三次握手
     // 实际在linux中 connect调用后 会进入一个while循环
     // 循环跳出的条件是socket的状态变为ESTABLISHED 表面看上去就是 正在连接中 阻塞
     // 而状态的改变在别的地方进行 在我们这就是tju_handle_packet
-    sock->state = ESTABLISHED;
+    // sock->state = ESTABLISHED;
 
     // 将建立了连接的socket放入内核 已建立连接哈希表中
     int hashval = cal_hash(local_addr.ip, local_addr.port, target_addr.ip, target_addr.port);
@@ -141,6 +166,7 @@ int tju_recv(tju_tcp_t* sock, void *buffer, int len){
 
     while(pthread_mutex_lock(&(sock->recv_lock)) != 0); // 加锁
 
+    // read_len = min(received_len, len)
     int read_len = 0;
     if (sock->received_len >= len){ // 从中读取len长度的数据
         read_len = len;
@@ -166,11 +192,45 @@ int tju_recv(tju_tcp_t* sock, void *buffer, int len){
     return 0;
 }
 
+// 把内核收到的数据放到sock->receive_buf，内核可使用该函数传递内核缓冲区收到的packet
 int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     
     uint32_t data_len = get_plen(pkt) - DEFAULT_HEADER_LEN;
 
-    // 把收到的数据放到接受缓冲区
+    // 状态机
+    uint8 flags = get_flags(pkt);
+    uint32_t seq = get_seq(pkt);
+    // Receiver: [server], Flags: [SYN]
+    if(data_len == 0 && flags == SYN_FLAG_MASK){
+        // 新建socket
+        tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
+        memcpy(new_conn, sock, sizeof(tju_tcp_t));
+        use_new_conn = 1;
+        tju_sock_addr local_addr, remote_addr;
+        remote_addr.ip = inet_network(CLIENT_IP);  // client的IP地址
+        remote_addr.port = get_src(pkt);  // client端口
+        local_addr.ip = sock->bind_addr.ip;  // server的IP地址
+        local_addr.port = sock->bind_addr.port + 1;  // server端口: 应随机化一个新的
+        new_conn->established_local_addr = local_addr;
+        new_conn->established_remote_addr = remote_addr;
+        uint32_t server_isn = 464;  // 后续应随机化
+        // 加入listen socket队列
+        
+        // 发送 SYN + ACK
+        send_flags(new_conn, server_isn, seq + 1, local_addr, remote_addr, SYN_FLAG_MASK | ACK_FLAG_MASK);
+        new_conn->state = SYN_RECV;
+    }
+    // Receiver: [client], Flags: [SYN + ACK]
+    if(data_len == 0 && flags == SYN_FLAG_MASK | ACK_FLAG_MASK){
+        sock->state = ESTABLISHED;
+    }
+    // Receiver: [server], Flags: [ACK]
+    if(data_len == 0 && flags == ACK_FLAG_MASK){
+        // 3. 接收 ACK
+        sock->state = ESTABLISHED;
+    }
+
+    // 返回值非0，说明需要加锁失败，要一直尝试加锁
     while(pthread_mutex_lock(&(sock->recv_lock)) != 0); // 加锁
 
     if(sock->received_buf == NULL){
@@ -178,15 +238,31 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     }else {
         sock->received_buf = realloc(sock->received_buf, sock->received_len + data_len);
     }
+    // 这里脱下头部，只复制数据
     memcpy(sock->received_buf + sock->received_len, pkt + DEFAULT_HEADER_LEN, data_len);
     sock->received_len += data_len;
 
     pthread_mutex_unlock(&(sock->recv_lock)); // 解锁
 
-
     return 0;
 }
 
 int tju_close (tju_tcp_t* sock){
+    return 0;
+}
+
+
+// ### 辅助函数,用户不应该调用 ###
+static int send_flags(tju_tcp_t* sock,
+                      uint32_t seq,
+                      uint32_t ack_num,
+                      tju_sock_addr local_addr,
+                      tju_sock_addr remote_addr,
+                      uint8_t flags){
+    char* msg;
+    uint16_t plen = DEFAULT_HEADER_LEN;  // 无payload
+    msg = create_packet_buf(local_addr.port, remote_addr.port, seq, ack_num, 
+              DEFAULT_HEADER_LEN, plen, flags, 1, 0, NULL, 0);
+    sendToLayer3(msg, plen);
     return 0;
 }

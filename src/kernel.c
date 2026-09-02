@@ -10,7 +10,7 @@ void onTCPPocket(char* pkt){
 
     char hostname[8];
     gethostname(hostname, 8);
-    uint32_t remote_ip, local_ip;
+    uint32_t remote_ip, local_ip;  // 选择 ip
     if(strcmp(hostname,"server")==0){ // 自己是服务端 远端就是客户端
         local_ip = inet_network(SERVER_IP);
         remote_ip = inet_network(CLIENT_IP);
@@ -96,7 +96,7 @@ void* receive_thread(void* arg){
         len = recvfrom(BACKEND_UDPSOCKET_ID, hdr, DEFAULT_HEADER_LEN, MSG_PEEK, (struct sockaddr *)&from_addr, &from_addr_size);
         // 一旦收到了大于header长度的数据 则接受整个TCP包
         if(len >= DEFAULT_HEADER_LEN){
-            plen = get_plen(hdr); 
+            plen = get_plen(hdr);
             pkt = malloc(plen);
             buf_size = 0;
             while(buf_size < plen){ // 直到接收到 plen 长度的数据 接受的数据全部存在pkt中
@@ -136,14 +136,15 @@ void startSimulation(){
         exit(-1);
     }
 
-    // 设置socket选项 SO_REUSEADDR = 1 
+    // 设置socket选项 SO_REUSEADDR = 1 允许端口复用
     // 意思是 允许绑定本地地址冲突 和 改变了系统对处于TIME_WAIT状态的socket的看待方式 
     int optval = 1;
     setsockopt(BACKEND_UDPSOCKET_ID, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval , sizeof(int));
 
     struct sockaddr_in conn;
-    memset(&conn, 0, sizeof(conn)); 
+    memset(&conn, 0, sizeof(conn));
     conn.sin_family = AF_INET;
+    // 监听本机上任何IP端口
     conn.sin_addr.s_addr = htonl(INADDR_ANY); // INADDR_ANY = 0.0.0.0
     conn.sin_port = htons((unsigned short)20218);
 
