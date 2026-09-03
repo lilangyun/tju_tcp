@@ -112,13 +112,14 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     sock->state = ESTABLISHED;
     */
 
+    // 从listen_socks哈希表中取消
+    hashval = cal_hash(local_addr.ip, local_addr.port, 0, 0);
+    listen_socks[hashval] = NULL;
+
     // 将建立了连接的socket放入内核 已建立连接哈希表中
-    int hashval = cal_hash(local_addr.ip, local_addr.port, target_addr.ip, target_addr.port);
+    hashval = cal_hash(local_addr.ip, local_addr.port, target_addr.ip, target_addr.port);
     established_socks[hashval] = sock;
     
-    // 从listen_socks哈希表中取消
-    int hashval = cal_hash(local_addr.ip, local_addr.port, 0, 0);
-    listen_socks[hashval] = NULL;
     return 0;
 }
 
@@ -200,10 +201,10 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
 
         // 将new_conn加入listen _socket half_conn_queue
         int hashval = cal_hash(sock->bind_addr.ip, sock->bind_addr.port, 0, 0);
-        pthread_mutex_lock(half_conn_queue[hashval]->lock);
-        conn_node* new_conn_node = create_half_conn_node(new_conn);
+        pthread_mutex_lock(&(half_conn_queue[hashval]->lock));
+        conn_node* new_conn_node = create_conn_node(new_conn);
         push_half_conn_queue(hashval, new_conn_node);
-        pthread_mutex_unlock(half_conn_queue[hashval]->lock);
+        pthread_mutex_unlock(&(half_conn_queue[hashval]->lock));
 
         // 发送 SYN + ACK
         send_flags(new_conn, server_isn, client_isn + 1, local_addr, remote_addr, SYN_FLAG_MASK | ACK_FLAG_MASK);
@@ -224,14 +225,14 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         int hashval = cal_hash(sock->bind_addr.ip, sock->bind_addr.port, 0, 0);
         int conn_hashval = cal_hash(sock->established_local_addr.port, sock->established_local_addr.ip, 
                     sock->established_remote_addr.port, sock->established_remote_addr.ip);
-        pthread_mutex_lock(half_conn_queue[hashval]->lock);
+        pthread_mutex_lock(&(half_conn_queue[hashval]->lock));
         conn_node* new_conn_node = remove_half_conn_queue(hashval, conn_hashval);
-        pthread_mutex_lock(half_conn_queue[hashval]->lock);
+        pthread_mutex_unlock(&(half_conn_queue[hashval]->lock));
 
         // 入全连接队列
-        pthread_mutex_lock(full_conn_queue[hashval]->lock);
+        pthread_mutex_lock(&(full_conn_queue[hashval]->lock));
         push_full_conn_queue(hashval, new_conn_node);
-        pthread_mutex_unlock(full_conn_queue[hashval]->lock);
+        pthread_mutex_unlock(&(full_conn_queue[hashval]->lock));
 
         // 状态转移
         tju_tcp_t* new_conn = new_conn_node->sock;
@@ -284,7 +285,7 @@ static int send_flags(tju_tcp_t* sock,
 // 初始化队列
 static int init_full_conn_queue(int listen_hashval){
     if(listen_hashval < 0){
-        printf("[init_conn_queue]: listen_hashval < 0 error!\n");
+        printf("[init_full_conn_queue]: listen_hashval < 0 error!\n");
         exit(1);
     }
     full_conn_queue[listen_hashval]->front =  NULL;
@@ -354,7 +355,7 @@ static int destroy_full_conn_queue(int listen_hashval){
 }
 
 // 判断非空
-static bool empty_full_conn_queue(int listen_hashval){
+static int empty_full_conn_queue(int listen_hashval){
     if(listen_hashval < 0){
         printf("[empty_conn_queue]: listen_hashval < 0 error!\n");
         exit(1);
@@ -430,7 +431,7 @@ static int destroy_half_conn_queue(int listen_hashval){
 }
 
 // 判断非空
-static bool empty_half_conn_queue(int listen_hashval){
+static int empty_half_conn_queue(int listen_hashval){
     if(listen_hashval < 0){
         printf("[empty_conn_queue]: listen_hashval < 0 error!\n");
         exit(1);

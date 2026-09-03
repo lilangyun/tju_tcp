@@ -12,10 +12,12 @@
 #define RECV_BUF_SIZE 5000 * SMSS
 #define SEND_BUF_SIZE 5000 * SMSS
 
+#define MAX_SOCK 32
+
 // listen_socks的连接队列节点
 typedef struct conn_node{
     tju_tcp_t* sock;
-    tju_tcp_t* next;
+    struct conn_node* next;
 }conn_node;
 
 // listen_socks的队列结构
@@ -95,7 +97,7 @@ static int init_full_conn_queue(int listen_hashval);
 static conn_node* create_conn_node(tju_tcp_t *new_conn);
 
 // 入队
-static int push_full_conn_queue(conn_node* new_conn_node);
+static int push_full_conn_queue(int listen_hashval, conn_node* new_conn_node);
 
 // 出队
 static conn_node* pop_full_conn_queue(int listen_hashval);
@@ -104,7 +106,7 @@ static conn_node* pop_full_conn_queue(int listen_hashval);
 static int destroy_full_conn_queue(int listen_hashval);
 
 // 判断非空
-static bool empty_full_conn_queue(int listen_hashval);
+static int empty_full_conn_queue(int listen_hashval);
 /*
 ######################半连接队列辅助函数###################
 */
@@ -112,7 +114,7 @@ static bool empty_full_conn_queue(int listen_hashval);
 static int init_half_conn_queue(int listen_hashval);
 
 // 入队
-static int push_half_conn_queue(conn_node* new_conn_node);
+static int push_half_conn_queue(int listen_hashval, conn_node* new_conn_node);
 
 // 出队
 static conn_node* pop_half_conn_queue(int listen_hashval);
@@ -121,7 +123,7 @@ static conn_node* pop_half_conn_queue(int listen_hashval);
 static int destroy_half_conn_queue(int listen_hashval);
 
 // 判断非空
-static bool empty_half_conn_queue(int listen_hashval);
+static int empty_half_conn_queue(int listen_hashval);
 
 // 移除指定元素
 static conn_node* remove_half_conn_queue(int listen_hashval, int conn_hashval);
