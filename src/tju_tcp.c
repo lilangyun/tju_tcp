@@ -55,37 +55,7 @@ int tju_listen(tju_tcp_t* sock){
 因为只要该函数返回, 用户就可以马上使用该socket进行send和recv
 */
 tju_tcp_t* tju_accept(tju_tcp_t* listen_sock){
-    tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
-    memcpy(new_conn, listen_sock, sizeof(tju_tcp_t));
-
-    tju_sock_addr local_addr, remote_addr;
-    /*
-     这里涉及到TCP连接的建立
-     正常来说应该是收到客户端发来的SYN报文
-     从中拿到对端的IP和PORT
-     换句话说 下面的处理流程其实不应该放在这里 应该在tju_handle_packet中
-    */ 
-    remote_addr.ip = inet_network(CLIENT_IP);  //具体的IP地址
-    remote_addr.port = 5678;  //端口
-
-    local_addr.ip = listen_sock->bind_addr.ip;  //具体的IP地址
-    local_addr.port = listen_sock->bind_addr.port;  //端口
-
-    // 建立连接后，修改
-    new_conn->established_local_addr = local_addr;
-    new_conn->established_remote_addr = remote_addr;
-
-    // 这里应该是经过三次握手后才能修改状态为ESTABLISHED
-    new_conn->state = ESTABLISHED;
-
-    // 将新的conn放到内核建立连接的socket哈希表中
-    int hashval = cal_hash(local_addr.ip, local_addr.port, remote_addr.ip, remote_addr.port);
-    established_socks[hashval] = new_conn;
-
-    // 如果new_conn的创建过程放到了tju_handle_packet中 那么accept怎么拿到这个new_conn呢
-    // 在linux中 每个listen socket都维护一个已经完成连接的socket队列
-    // 每次调用accept 实际上就是取出这个队列中的一个元素
-    // 队列为空,则阻塞 
+    
     return new_conn;
 }
 
@@ -113,12 +83,11 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     uint16_t plen = DEFAULT_HEADER_LEN;  // 无payload
     msg = create_packet_buf(local_addr.port, target_addr.port, seq, 0, 
               DEFAULT_HEADER_LEN, plen, SYN_FLAG_MASK, 1, 0, NULL, 0);
-    sendToLayer3(msg, plen);
-    sock->state = SYN_SENT;
-
-    // 监听端口
+    // 放入listen_socks，用于发送SYN后接收flags
     int hashval = cal_hash(local_addr.ip, local_addr.port, 0, 0);
     listen_socks[hashval] = sock;
+    sendToLayer3(msg, plen);
+    sock->state = SYN_SENT;
 
     // 接收SYN + ACK
     while (sock->state != ESTABLISHED){
@@ -139,7 +108,10 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     // 将建立了连接的socket放入内核 已建立连接哈希表中
     int hashval = cal_hash(local_addr.ip, local_addr.port, target_addr.ip, target_addr.port);
     established_socks[hashval] = sock;
-
+    
+    // 从listen_socks哈希表中取消
+    int hashval = cal_hash(local_addr.ip, local_addr.port, 0, 0);
+    listen_socks[hashval] = NULL;
     return 0;
 }
 
@@ -205,7 +177,6 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         // 新建socket
         tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
         memcpy(new_conn, sock, sizeof(tju_tcp_t));
-        use_new_conn = 1;
         tju_sock_addr local_addr, remote_addr;
         remote_addr.ip = inet_network(CLIENT_IP);  // client的IP地址
         remote_addr.port = get_src(pkt);  // client端口
@@ -214,7 +185,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         new_conn->established_local_addr = local_addr;
         new_conn->established_remote_addr = remote_addr;
         uint32_t server_isn = 464;  // 后续应随机化
-        // 加入listen socket队列
+        // 将new_conn加入listen socket队列
         
         // 发送 SYN + ACK
         send_flags(new_conn, server_isn, seq + 1, local_addr, remote_addr, SYN_FLAG_MASK | ACK_FLAG_MASK);

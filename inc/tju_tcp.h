@@ -12,6 +12,8 @@
 #define RECV_BUF_SIZE 5000 * SMSS
 #define SEND_BUF_SIZE 5000 * SMSS
 
+
+
 /*
 创建 TCP socket 
 初始化对应的结构体
