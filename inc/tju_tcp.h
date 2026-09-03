@@ -12,7 +12,21 @@
 #define RECV_BUF_SIZE 5000 * SMSS
 #define SEND_BUF_SIZE 5000 * SMSS
 
+// listen_socks的连接队列节点
+typedef struct conn_node{
+    tju_tcp_t* sock;
+    tju_tcp_t* next;
+}conn_node;
 
+// listen_socks的队列结构
+typedef struct conn_queue{
+    conn_node* front;
+    conn_node* rear;
+    pthread_mutex_t lock;  // 每个connect queue都有自己的锁
+}conn_queue;
+
+conn_queue* half_conn_queue[MAX_SOCK];  // 半连接队列
+conn_queue* full_conn_queue[MAX_SOCK];  // 全连接队列
 
 /*
 创建 TCP socket 
@@ -62,5 +76,55 @@ int tju_close (tju_tcp_t* sock);
 
 
 int tju_handle_packet(tju_tcp_t* sock, char* pkt);
+
+// ### 三次握手辅助函数 ### //
+static int send_flags(tju_tcp_t* sock,
+                      uint32_t seq,
+                      uint32_t ack_num,
+                      tju_sock_addr local_addr,
+                      tju_sock_addr remote_addr,
+                      uint8_t flags);
+
+/*
+################ 全连接队列辅助函数 #####################
+*/
+// 初始化队列
+static int init_full_conn_queue(int listen_hashval);
+
+// 创建节点
+static conn_node* create_conn_node(tju_tcp_t *new_conn);
+
+// 入队
+static int push_full_conn_queue(conn_node* new_conn_node);
+
+// 出队
+static conn_node* pop_full_conn_queue(int listen_hashval);
+
+// 销毁队列
+static int destroy_full_conn_queue(int listen_hashval);
+
+// 判断非空
+static bool empty_full_conn_queue(int listen_hashval);
+/*
+######################半连接队列辅助函数###################
+*/
+// 初始化队列
+static int init_half_conn_queue(int listen_hashval);
+
+// 入队
+static int push_half_conn_queue(conn_node* new_conn_node);
+
+// 出队
+static conn_node* pop_half_conn_queue(int listen_hashval);
+
+// 销毁队列
+static int destroy_half_conn_queue(int listen_hashval);
+
+// 判断非空
+static bool empty_half_conn_queue(int listen_hashval);
+
+// 移除指定元素
+static conn_node* remove_half_conn_queue(int listen_hashval, int conn_hashval);
+
 #endif
 
