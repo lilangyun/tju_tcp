@@ -285,7 +285,7 @@ static int send_flags(tju_tcp_t* sock,
 // 初始化队列
 static int init_full_conn_queue(int listen_hashval){
     if(listen_hashval < 0){
-        printf("[init_full_conn_queue]: listen_hashval < 0 error!\n");
+        printf("[init_full_conn_queue]: listen_hashval is %d < 0 error!\n", listen_hashval);
         exit(1);
     }
     full_conn_queue[listen_hashval]->front =  NULL;
