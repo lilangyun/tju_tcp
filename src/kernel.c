@@ -12,6 +12,7 @@ void onTCPPocket(char* pkt){
     gethostname(hostname, 8);
     uint32_t remote_ip, local_ip;  // 选择 ip
     if(strcmp(hostname,"server")==0){ // 自己是服务端 远端就是客户端
+        // printf("Server receive the packet.\n");
         local_ip = inet_network(SERVER_IP);
         remote_ip = inet_network(CLIENT_IP);
     }else if(strcmp(hostname,"client")==0){ // 自己是客户端 远端就是服务端 
@@ -165,5 +166,5 @@ void startSimulation(){
 
 int cal_hash(uint32_t local_ip, uint16_t local_port, uint32_t remote_ip, uint16_t remote_port){
     // 实际上肯定不是这么算的
-    return (local_ip+local_port+remote_ip+remote_port)%MAX_SOCK;
+    return (local_ip + local_port + remote_ip + remote_port)%MAX_SOCK;
 }

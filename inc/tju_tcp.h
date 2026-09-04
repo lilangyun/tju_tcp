@@ -24,7 +24,7 @@ typedef struct conn_node{
 typedef struct conn_queue{
     conn_node* front;
     conn_node* rear;
-    pthread_mutex_t lock;  // 每个connect queue都有自己的锁
+    pthread_mutex_t* lock;  // 每个connect queue都有自己的锁
 }conn_queue;
 
 conn_queue* half_conn_queue[MAX_SOCK];  // 半连接队列

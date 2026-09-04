@@ -14,7 +14,7 @@ int main(int argc, char **argv) {
     target_addr.port = 1234;
 
     tju_connect(my_socket, target_addr);
-    // printf("my_socket state %d\n", my_socket->state);      
+    printf("my_socket state %d\n", my_socket->state);      
 
     // uint32_t conn_ip;
     // uint16_t conn_port;
