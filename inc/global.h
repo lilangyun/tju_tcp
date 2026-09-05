@@ -16,6 +16,9 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 
+// 信号处理
+#include <signal.h>
+
 // 单位是byte
 #define SIZE32 4
 #define SIZE16 2
@@ -29,7 +32,7 @@
 #define FALSE 0
 
 // 定义最大包长 防止IP层分片
-#define MAX_DLEN 1375 	// 最大包内数据长度
+#define MAX_DLEN 1380 	// 最大包内数据长度
 #define MAX_LEN 1400 	// 最大包长度
 
 // TCP socket 状态定义
@@ -58,28 +61,30 @@
 typedef struct {
 	uint16_t window_size;
 
-//   uint32_t base;
-//   uint32_t nextseq;
-//   uint32_t estmated_rtt;
-//   int ack_cnt;
-//   pthread_mutex_t ack_cnt_lock;
-//   struct timeval send_time;
-//   struct timeval timeout;
-//   uint16_t rwnd; 
-//   int congestion_status;
-//   uint16_t cwnd; 
-//   uint16_t ssthresh; 
+	// 以下是初始时注释内容
+  	uint32_t base;
+  	uint32_t nextseq;
+  	uint32_t estmated_rtt;
+  	int ack_cnt;
+  	pthread_mutex_t ack_cnt_lock;
+  	struct timeval send_time;
+  	struct timeval timeout;
+  	uint16_t rwnd;
+  	int congestion_status;
+  	uint16_t cwnd;
+  	uint16_t ssthresh; 
 } sender_window_t;
 
-// TCP 接受窗口
+// TCP 接收窗口
 // 注释的内容如果想用就可以用 不想用就删掉 仅仅提供思路和灵感
 typedef struct {
 	char received[TCP_RECVWN_SIZE];
 
-//   received_packet_t* head;
-//   char buf[TCP_RECVWN_SIZE];
-//   uint8_t marked[TCP_RECVWN_SIZE];
-//   uint32_t expect_seq;
+	// 以下是初始时注释内容
+	// received_packet_t* head;
+	// char buf[TCP_RECVWN_SIZE];
+	uint8_t marked[TCP_RECVWN_SIZE];
+	uint32_t expect_seq;
 } receiver_window_t;
 
 // TCP 窗口 每个建立了连接的TCP都包括发送和接受两个窗口

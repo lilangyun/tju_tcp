@@ -15,10 +15,10 @@ int main(int argc, char **argv) {
     tju_bind(my_server, bind_addr);
 
     tju_listen(my_server);
-    printf("my_server state %d\n", my_server->state);
+    // printf("my_server state %d\n", my_server->state);
 
     tju_tcp_t* new_conn = tju_accept(my_server);
-    printf("new_conn state %d\n", new_conn->state);      
+    // printf("new_conn state %d\n", new_conn->state);
 
     // uint32_t conn_ip;
     // uint16_t conn_port;
