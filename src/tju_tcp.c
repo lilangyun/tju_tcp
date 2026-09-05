@@ -22,7 +22,7 @@ tju_tcp_t* tju_socket(){
         exit(-1);
     }
 
-    sock->window.wnd_recv = NULL;
+    sock->window.wnd_send = NULL;
     sock->window.wnd_recv = NULL;
 
     return sock;
@@ -62,6 +62,22 @@ tju_tcp_t* tju_accept(tju_tcp_t* listen_sock){
     int hashval = cal_hash(listen_sock->bind_addr.ip, listen_sock->bind_addr.port, 0, 0);
     while(empty_full_conn_queue(hashval)){
         // 阻塞等待全连接队列不为空
+        if(retry[SYNACK_RETRY] && !empty_half_conn_queue(hashval)){
+            /*[SYNACK Timeout]
+            * new_conn已经进入半连接队列并且当前状态处于SYN_RECV
+            * 需要提前在 sender_window 中设置当前连接的seq和ack_num
+            */
+            conn_node front_info = *(half_conn_queue[hashval]->front);
+            uint32_t seq = front_info.sock->window.wnd_send->base;
+            uint32_t ack_num = front_info.sock->window.wnd_recv->expect_seq;
+            tju_sock_addr local_addr = front_info.sock->established_local_addr;
+            tju_sock_addr remote_addr = front_info.sock->established_remote_addr;
+            send_flags(seq, ack_num, local_addr, remote_addr, SYN_FLAG_MASK | ACK_FLAG_MASK);
+
+            // 重新设置 SYN + ACK 超时监测
+            set_timeout(3, SYNACK_RETRY);
+            printf("Server retransmit SYNACK!\n");
+        }
     }
     // 从全连接队列中出队
     conn_node* new_conn_node = pop_full_conn_queue(hashval);
@@ -88,30 +104,27 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
 
     // 三次握手
     // 发送SYN
-    char* msg;
     struct timespec sp;
     clock_gettime(CLOCK_MONOTONIC, &sp);
     uint32_t seq = sp.tv_sec % (SEQ_MAX);
-    uint16_t plen = DEFAULT_HEADER_LEN;  // 无payload
-    msg = create_packet_buf(local_addr.port, target_addr.port, seq, 0, 
-              DEFAULT_HEADER_LEN, plen, SYN_FLAG_MASK, 1, 0, NULL, 0);
-    // 放入listen_socks，用于发送SYN后接收SYN-ACK
+    send_flags(seq, 0, local_addr, target_addr, SYN_FLAG_MASK);
+
+    // 放入listen_socks哈希表，用于发送SYN后接收SYN-ACK
     int hashval = cal_hash(local_addr.ip, local_addr.port, 0, 0);
     listen_socks[hashval] = sock;
-    sendToLayer3(msg, plen);
     sock->state = SYN_SENT;
     printf("Client sent SYN!\n");
 
     // 设置 SYN 超时检测
-    set_timeout(3);
+    set_timeout(3, SYN_RETRY);
 
     // 接收 SYN + ACK
     while (sock->state != ESTABLISHED){
         // 阻塞
-        if(retransmit){
-            // 重传
-            sendToLayer3(msg, plen);
-            set_timeout(3);
+        if(retry[SYN_RETRY]){
+            // 重传 SYN 
+            send_flags(seq, 0, local_addr, target_addr, SYN_FLAG_MASK);
+            set_timeout(3, SYN_RETRY);
             printf("Client retransmit SYN!\n");
         }
     }
@@ -137,8 +150,19 @@ int tju_send(tju_tcp_t* sock, const void *buffer, int len){
 }
 int tju_recv(tju_tcp_t* sock, void *buffer, int len){
     while(sock->received_len<=0){
-        // 阻塞
+        // 计算hash值
+        if(retry[ACK_RETRY]){
+            uint32_t seq = sock->window.wnd_send->base;
+            uint32_t ack_num = sock->window.wnd_recv->expect_seq;
+            tju_sock_addr local_addr = sock->established_local_addr;
+            tju_sock_addr remote_addr = sock->established_remote_addr;
+            send_flags(seq, ack_num, local_addr, remote_addr, SYN_FLAG_MASK | ACK_FLAG_MASK);
+            set_timeout(3, ACK_RETRY);
+            printf("Client retransmit ACK!\n");
+        }
     }
+    // Kernel接收到数据 --> 无需重传ACK
+    stop_timeout(ACK_RETRY);
 
     while(pthread_mutex_lock(&(sock->recv_lock)) != 0); // 加锁
 
@@ -174,9 +198,10 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     tju_sock_addr local_addr, remote_addr;
     remote_addr.ip = inet_network(CLIENT_IP);
     remote_addr.port = get_src(pkt);
-    local_addr.ip = sock->bind_addr.ip;
+    local_addr.ip = inet_network(SERVER_IP);
     local_addr.port = get_dst(pkt);
 
+    // 其余参数
     uint32_t data_len = get_plen(pkt) - DEFAULT_HEADER_LEN;
     uint8_t flags = get_flags(pkt);
     uint32_t seq = get_seq(pkt);
@@ -187,16 +212,27 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     */ 
     // Receiver: [server], Flags: [SYN]
     if(data_len == 0 && flags == SYN_FLAG_MASK){
+
         // 新建socket: new_conn
         tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
         memcpy(new_conn, sock, sizeof(tju_tcp_t));
         new_conn->established_local_addr.port = local_addr.port + 1;  // 这里也应该改为随机选取
         new_conn->established_local_addr.ip = local_addr.ip;
         new_conn->established_remote_addr = remote_addr;
+
+        // 设置 isn
         struct timespec sp;
         clock_gettime(CLOCK_MONOTONIC, &sp);
         uint32_t server_isn = sp.tv_sec % SEQ_MAX;
         uint32_t client_isn = seq;
+
+        // 初始化 window -> 用于用户线程重传 SYNACK
+        new_conn->window.wnd_send = (sender_window_t*)(malloc(sizeof(sender_window_t)));
+        new_conn->window.wnd_recv = (receiver_window_t*)(malloc(sizeof(receiver_window_t)));
+        new_conn->window.wnd_send->window_size = 1;
+        new_conn->window.wnd_send->base = server_isn;
+        new_conn->window.wnd_send->nextseq = server_isn;
+        new_conn->window.wnd_recv->expect_seq = client_isn + 1;
 
         // 将new_conn加入listen _socket half_conn_queue
         int hashval = cal_hash(sock->bind_addr.ip, sock->bind_addr.port, 0, 0);
@@ -213,37 +249,45 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         established_socks[hashval] = new_conn;
 
         // 发送 SYN + ACK
-        send_flags(new_conn, server_isn, client_isn + 1,
+        send_flags(server_isn, client_isn + 1,
                    new_conn->established_local_addr,
                    new_conn->established_remote_addr,
                    SYN_FLAG_MASK | ACK_FLAG_MASK);
-        sock->state = SYN_RECV;
         new_conn->state = SYN_RECV;
         printf("Server sent SYNACK!\n");
+        
+        // 设置 SYN + ACK 超时检测
+        set_timeout(3, SYNACK_RETRY);
     }
     // Receiver: [client], Flags: [SYN + ACK]
-    if(data_len == 0 && flags == (SYN_FLAG_MASK | ACK_FLAG_MASK)){
-        // 取消 SYN 超时检测
-        stop_timeout();
+    else if(data_len == 0 && flags == (SYN_FLAG_MASK | ACK_FLAG_MASK)){
 
-        uint32_t server_isn = seq;
+        // 取消 SYN 超时检测
+        stop_timeout(SYN_RETRY);
 
         // 更换连接的远程地址为new_conn，而不是bind_addr
         sock->established_remote_addr = remote_addr;
+
+        // 设置 window
+        sock->window.wnd_send = (sender_window_t *)(malloc(sizeof(sender_window_t)));
+        sock->window.wnd_recv = (receiver_window_t *)(malloc(sizeof(receiver_window_t)));
+        sock->window.wnd_send->base = ack_num;
+        sock->window.wnd_send->nextseq = ack_num;
+        sock->window.wnd_recv->expect_seq = seq + 1;
         
         // 发送ACK
-        send_flags(sock, ack_num, server_isn + 1, local_addr, remote_addr, ACK_FLAG_MASK);
+        send_flags(ack_num, seq + 1, local_addr, remote_addr, ACK_FLAG_MASK);
         sock->state = ESTABLISHED;
         printf("Client sent ACK!\n");
 
         // 设置 ACK 超时检测
-        set_timeout(3);
+        set_timeout(3, SYNACK_RETRY);
 
         // 从listen_socks哈希表中取消
         int hashval = cal_hash(local_addr.ip, local_addr.port, 0, 0);
         listen_socks[hashval] = NULL;
 
-        // 将建立了连接的socket放入内核 已建立连接哈希表中
+        // 放入established_socks哈希表中
         int conn_hashval = cal_hash(local_addr.ip, 
                                     local_addr.port, 
                                     remote_addr.ip, 
@@ -251,16 +295,15 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         established_socks[conn_hashval] = sock;
     }
     // Receiver: [server], Flags: [ACK]
-    if(data_len == 0 && flags == ACK_FLAG_MASK){
-        // 取消 SYN + ACK 超时检测
-        stop_timeout();
+    else if(data_len == 0 && flags == ACK_FLAG_MASK){
 
-        // 3. 接收 ACK
+        // 取消 SYN + ACK 超时检测
+        stop_timeout(SYNACK_RETRY);
+
         // 出半连接队列
         int hashval = cal_hash(sock->bind_addr.ip, sock->bind_addr.port, 0, 0);
         int conn_hashval = cal_hash(local_addr.ip, local_addr.port, 
                                     remote_addr.ip, remote_addr.port);
-        
         pthread_mutex_lock(half_conn_queue[hashval]->lock);
         conn_node* new_conn_node = remove_half_conn_queue(hashval, conn_hashval);
         if(new_conn_node == NULL){
@@ -305,10 +348,10 @@ int tju_close (tju_tcp_t* sock){
 
 
 /*
-############################## 辅助函数,用户不应该调用 ##############################
+* ############################## 辅助函数,用户不应该调用 ##############################
 */
-static int send_flags(tju_tcp_t* sock,
-                      uint32_t seq,
+// 用于单独发送三次握手的flags
+static int send_flags(uint32_t seq,
                       uint32_t ack_num,
                       tju_sock_addr local_addr,
                       tju_sock_addr remote_addr,
@@ -319,4 +362,4 @@ static int send_flags(tju_tcp_t* sock,
               DEFAULT_HEADER_LEN, plen, flags, 1, 0, NULL, 0);
     sendToLayer3(msg, plen);
     return 0;
-}
+}// Sock参数当前未使用

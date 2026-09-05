@@ -64,15 +64,15 @@ typedef struct {
 	// 以下是初始时注释内容
   	uint32_t base;
   	uint32_t nextseq;
-  	uint32_t estmated_rtt;
-  	int ack_cnt;
-  	pthread_mutex_t ack_cnt_lock;
-  	struct timeval send_time;
-  	struct timeval timeout;
-  	uint16_t rwnd;
-  	int congestion_status;
-  	uint16_t cwnd;
-  	uint16_t ssthresh; 
+  	// uint32_t estmated_rtt;
+  	// int ack_cnt;
+  	// pthread_mutex_t ack_cnt_lock;
+  	// struct timeval send_time;
+  	// struct timeval timeout;
+  	// uint16_t rwnd;
+  	// int congestion_status;
+  	// uint16_t cwnd;
+  	// uint16_t ssthresh; 
 } sender_window_t;
 
 // TCP 接收窗口
@@ -83,7 +83,7 @@ typedef struct {
 	// 以下是初始时注释内容
 	// received_packet_t* head;
 	// char buf[TCP_RECVWN_SIZE];
-	uint8_t marked[TCP_RECVWN_SIZE];
+	// uint8_t marked[TCP_RECVWN_SIZE];
 	uint32_t expect_seq;
 } receiver_window_t;
 

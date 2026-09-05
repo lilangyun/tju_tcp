@@ -75,8 +75,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt);
 /*
 ################# 三次握手辅助函数 #########################
 */
-static int send_flags(tju_tcp_t* sock,
-                      uint32_t seq,
+static int send_flags(uint32_t seq,
                       uint32_t ack_num,
                       tju_sock_addr local_addr,
                       tju_sock_addr remote_addr,
