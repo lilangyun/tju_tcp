@@ -12,6 +12,8 @@
 #include "global.h"
 
 extern int retry[5];
+extern pthread_mutex_t* retry_lock[5];
+
 static void (*timeout_check[5])(int);
 
 void set_timeout(int sec, int re_num);

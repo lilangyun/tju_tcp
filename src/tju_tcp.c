@@ -361,6 +361,9 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     }
     // Receiver: [Active], Flags: [ACK | FIN]
     else if(sock->state == FIN_WAIT_1 && data_len == 0 && flags == (ACK_FLAG_MASK | FIN_FLAG_MASK)){
+        // 取消FIN超时监控
+        stop_timeout(FIN_RETRY);
+
         // 设置 window
         sock->window.wnd_send->window_size = 1;
         sock->window.wnd_send->base = ack_num;
@@ -418,13 +421,6 @@ int tju_close (tju_tcp_t* sock){
 
     // 等待 2 * MSL
     set_timeout(2 * MSL, 0);
-
-    // 释放数据结构 -> 不再接收
-    free(sock->sending_buf);
-    free(sock->received_buf);
-    free(sock->window.wnd_recv);
-    free(sock->window.wnd_send);
-
     printf("%s closed!\n", hostname);
 
     return 0;
@@ -443,8 +439,12 @@ static int send_flags(tju_tcp_t* sock, uint8_t flags){
     uint32_t ack_num = sock->window.wnd_recv->expect_seq;
     tju_sock_addr local_addr = sock->established_local_addr;
     tju_sock_addr remote_addr = sock->established_remote_addr;
+
+    // 组成包
     msg = create_packet_buf(local_addr.port, remote_addr.port, seq, ack_num, 
               DEFAULT_HEADER_LEN, plen, flags, 1, 0, NULL, 0);
+
+    // UDP发送
     sendToLayer3(msg, plen);
     return 0;
 }

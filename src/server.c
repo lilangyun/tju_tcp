@@ -47,5 +47,7 @@ int main(int argc, char **argv) {
     sleep(3);
     tju_close(new_conn);
 
+    sleep(3);
+
     return EXIT_SUCCESS;
 }
