@@ -1,12 +1,13 @@
 #include "timer.h"
 
-int retry[4] = {0};
+int retry[5] = {0};
 
-static void (*timeout_check[4])(int) = {
+static void (*timeout_check[5])(int) = {
     NULL, 
     syn_timeout_check, 
     synack_timeout_check,
-    ack_timeout_check
+    ack_timeout_check,
+    fin_timeout_check,
 };
 
 void set_timeout(int sec, int re_num){
@@ -34,4 +35,8 @@ void synack_timeout_check(int signal){
 
 void ack_timeout_check(int signal){
     retry[ACK_RETRY] = 1;
+}
+
+void fin_timeout_check(int signal){
+    retry[FIN_RETRY] = 1;
 }

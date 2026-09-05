@@ -68,7 +68,7 @@ typedef struct {
   	// int ack_cnt;
   	// pthread_mutex_t ack_cnt_lock;
   	// struct timeval send_time;
-  	// struct timeval timeout;
+  	struct timeval timeout;
   	// uint16_t rwnd;
   	// int congestion_status;
   	// uint16_t cwnd;
