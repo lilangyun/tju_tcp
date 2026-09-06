@@ -20,6 +20,8 @@ void onTCPPocket(char* pkt){
         remote_ip = inet_network(SERVER_IP);
     }
 
+    // printf("[KERNEL] Received pkt src=%d dst=%d flags=0x%x\n", remote_port, local_port, get_flags(pkt));
+
     int hashval;
     // 根据4个ip port 组成四元组 查找有没有已经建立连接的socket
     hashval = cal_hash(local_ip, local_port, remote_ip, remote_port);

@@ -75,6 +75,11 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt);
 /*
 ################# 连接管理辅助函数 #########################
 */
+
+// 用于单独发送三次握手的flags
 static int send_flags(tju_tcp_t* sock, uint8_t flags);
+
+// 释放sock对应的连接资源
+static void free_sock(tju_tcp_t* sock);
 
 #endif
