@@ -388,6 +388,9 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     }
     // Receiver: [Active], Flags: [ACK | FIN]
     else if(sock->state == FIN_WAIT_2 && data_len == 0 && flags == (FIN_FLAG_MASK | ACK_FLAG_MASK)){
+        // 取消FINACK超时监控
+        stop_timeout(FINACK_RETRY);
+
         // 设置窗口
         sock->window.wnd_send->window_size = 1;
         sock->window.wnd_send->base = ack_num;
@@ -421,7 +424,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
 
         // 发送ACK
         send_flags(sock, (ACK_FLAG_MASK));
-        printf("%s(active) sent ACK!\n", hostname);
+        printf("%s(peer) sent ACK!\n", hostname);
         set_timeout(3, ACK_RETRY);
 
         // CLOSING 特殊状态
@@ -479,13 +482,18 @@ int tju_close (tju_tcp_t* sock){
                 // 重传 FINACK
                 send_flags(sock, (FIN_FLAG_MASK | ACK_FLAG_MASK));
                 set_timeout(3, FINACK_RETRY);
-                printf("%s(active) retransimit FINACK!\n", hostname);
+                if(sock->state != CLOSING){
+                    printf("%s(active) retransimit FINACK!\n", hostname);
+                }
+                else{
+                    printf("%s(peer) retransimit FINACK!\n", hostname);
+                }
             }
             if(sock->state == CLOSING && retry[ACK_RETRY]){
                 // 同时关闭连接可能需要重传ACK
                 send_flags(sock, ACK_FLAG_MASK);
                 set_timeout(3, ACK_RETRY);
-                printf("%s(active) retransimit ACK!\n", hostname);
+                printf("%s(peer) retransimit ACK!\n", hostname);
             }
         }
         // 等待 2 * MSL
