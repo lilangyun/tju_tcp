@@ -7,6 +7,7 @@
 */
 tju_tcp_t* tju_socket(){
     tju_tcp_t* sock = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
+    pthread_mutex_init(&(sock->state_lock), NULL);
     sock->state = CLOSED;
     
     pthread_mutex_init(&(sock->send_lock), NULL);
@@ -24,6 +25,9 @@ tju_tcp_t* tju_socket(){
 
     sock->window.wnd_send = NULL;
     sock->window.wnd_recv = NULL;
+
+    // 初始化定时模块
+    init_retry();
 
     return sock;
 }
@@ -118,7 +122,9 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     // 放入listen_socks哈希表，用于发送SYN后接收SYN+ACK
     int hashval = cal_hash(local_addr.ip, local_addr.port, 0, 0);
     listen_socks[hashval] = sock;
+    pthread_mutex_lock(&sock->state_lock);
     sock->state = SYN_SENT;
+    pthread_mutex_unlock(&sock->state_lock);
     printf("Client sent SYN!\n");
 
     // 设置 SYN 超时检测
@@ -230,7 +236,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         // 新建socket: new_conn
         tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
         memcpy(new_conn, sock, sizeof(tju_tcp_t));
-        new_conn->established_local_addr.port = local_addr.port + 1;
+        new_conn->established_local_addr.port = local_addr.port;
         new_conn->established_local_addr.ip = local_addr.ip;
         new_conn->established_remote_addr = remote_addr;
 
@@ -264,7 +270,11 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
 
         // 发送 SYN + ACK
         send_flags(new_conn, SYN_FLAG_MASK | ACK_FLAG_MASK);
+
+        // 设置状态
+        pthread_mutex_lock(&new_conn->state_lock);
         new_conn->state = SYN_RECV;
+        pthread_mutex_unlock(&new_conn->state_lock);
         printf("Server sent SYNACK!\n");
         
         // 设置 SYN + ACK 超时检测
@@ -287,11 +297,13 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         
         // 发送ACK
         send_flags(sock, ACK_FLAG_MASK);
+        pthread_mutex_lock(&sock->state_lock);
         sock->state = ESTABLISHED;
+        pthread_mutex_unlock(&sock->state_lock);
         printf("Client sent ACK!\n");
 
         // 设置 ACK 超时检测
-        set_timeout(3, SYNACK_RETRY);
+        set_timeout(3, ACK_RETRY);
 
         // 从listen_socks哈希表中取消
         int hashval = cal_hash(local_addr.ip, local_addr.port, 0, 0);
@@ -329,7 +341,9 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
 
         // 状态转移
         tju_tcp_t* new_conn = new_conn_node->sock;
+        pthread_mutex_lock(&new_conn->state_lock);
         new_conn->state = ESTABLISHED;
+        pthread_mutex_unlock(&new_conn->state_lock);
     /*
     ###################################三次握手状态机结束####################################
     */
@@ -337,44 +351,92 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     /*
     * #################################四次挥手状态机开始####################################
     */
-    // Receiver: [Passive], Flags: [FIN]
-    else if(sock->state == ESTABLISHED && data_len == 0 && flags == FIN_FLAG_MASK){
+    // Receiver: [Passive], Flags: [ACK | FIN]
+    else if((sock->state == ESTABLISHED) && data_len == 0 && flags == FIN_FLAG_MASK | ACK_FLAG_MASK){
         // 设置 window
         sock->window.wnd_send->window_size = 1;
         sock->window.wnd_send->base = ack_num;
         sock->window.wnd_send->nextseq = ack_num;
         sock->window.wnd_recv->expect_seq = seq + 1;
 
-        // // 发送ACK
-        // send_flags(sock, ACK_FLAG_MASK);
-        // printf("%s(passive) sent ACK!\n", hostname);
-        // sock->state = CLOSE_WAIT;
+        // 发送 ACK
+        send_flags(sock, (ACK_FLAG_MASK));
+        printf("%s(passive) sent ACK!\n", hostname);
+        pthread_mutex_lock(&sock->state_lock);
+        sock->state = CLOSE_WAIT;
+        pthread_mutex_unlock(&sock->state_lock);
 
-        // // 发送FIN
-        // send_flags(sock, FIN_FLAG_MASK);
-        // printf("%s(passive) sent FIN!\n", hostname);
-        // sock->state = CLOSED;
+        // 避免状态转移过快
+        sleep(5);
 
+        // 发送 FINACK
         send_flags(sock, (ACK_FLAG_MASK | FIN_FLAG_MASK));
-        printf("%s(passive) sent ACKFIN!\n", hostname);
-        sock->state = CLOSED;
+        printf("%s(passive) sent FINACK!\n", hostname);
+        pthread_mutex_lock(&sock->state_lock);
+        sock->state = LAST_ACK;
+        pthread_mutex_unlock(&sock->state_lock);
+    }
+    // Receiver: [Active], Flags: [ACK]
+    else if((sock->state == FIN_WAIT_1) && data_len == 0 && flags == (ACK_FLAG_MASK)){
+        // 取消FINACK超时监控
+        stop_timeout(FINACK_RETRY);
+        
+        // 状态转移->FIN_WAIT_2
+        pthread_mutex_lock(&sock->state_lock);
+        sock->state = FIN_WAIT_2;
+        pthread_mutex_unlock(&sock->state_lock);
     }
     // Receiver: [Active], Flags: [ACK | FIN]
-    else if(sock->state == FIN_WAIT_1 && data_len == 0 && flags == (ACK_FLAG_MASK | FIN_FLAG_MASK)){
-        // 取消FIN超时监控
-        stop_timeout(FIN_RETRY);
-
-        // 设置 window
+    else if(sock->state == FIN_WAIT_2 && data_len == 0 && flags == (ACK_FLAG_MASK | FIN_FLAG_MASK)){
+        // 设置窗口
         sock->window.wnd_send->window_size = 1;
         sock->window.wnd_send->base = ack_num;
         sock->window.wnd_send->nextseq = ack_num;
         sock->window.wnd_recv->expect_seq = seq + 1;
 
         // 发送ACK
-        send_flags(sock, ACK_FLAG_MASK);
+        send_flags(sock, (ACK_FLAG_MASK));
         printf("%s(active) sent ACK!\n", hostname);
+        pthread_mutex_lock(&sock->state_lock);
         sock->state = TIME_WAIT;
+        pthread_mutex_unlock(&sock->state_lock);
     }
+    // Receiver: [Passive], Flags: [ACK]
+    else if(sock->state == LAST_ACK && data_len == 0 && flags == ACK_FLAG_MASK){
+        // 关闭
+        pthread_mutex_lock(&sock->state_lock);
+        sock->state = CLOSED;
+        pthread_mutex_unlock(&sock->state_lock);
+    }
+    /*################################### 同时关闭连接 #######################################*/
+    // Receiver: [], Flags: [FINACK]
+    else if(sock->state == FIN_WAIT_1 && data_len == 0 && flags == FIN_FLAG_MASK | ACK_FLAG_MASK){
+        stop_timeout(FINACK_RETRY);
+
+        // 设置窗口
+        sock->window.wnd_send->window_size = 1;
+        sock->window.wnd_send->base = ack_num;
+        sock->window.wnd_send->nextseq = ack_num;
+        sock->window.wnd_recv->expect_seq = seq + 1;
+
+        // 发送ACK
+        send_flags(sock, (ACK_FLAG_MASK));
+        printf("%s(active) sent ACK!\n", hostname);
+        set_timeout(3, ACK_RETRY);
+
+        // CLOSING 特殊状态
+        pthread_mutex_lock(&sock->state_lock);
+        sock->state = CLOSING;
+        pthread_mutex_unlock(&sock->state_lock);
+    }
+    // Receiver: [], Flags: [ACK]
+    else if(sock->state == CLOSING && data_len == 0 && flags == ACK_FLAG_MASK){
+        stop_timeout(ACK_RETRY);
+        pthread_mutex_lock(&sock->state_lock);
+        sock->state = TIME_WAIT;
+        pthread_mutex_unlock(&sock->state_lock);
+    }
+
     /*
     * ###################################连接管理结束#######################################
     */
@@ -401,28 +463,58 @@ int tju_close (tju_tcp_t* sock){
     char hostname[8];
     gethostname(hostname, 8);
 
-    // 发送FIN
-    send_flags(sock, FIN_FLAG_MASK);
-    printf("%s(active) sent FIN!\n", hostname);
-    sock->state = FIN_WAIT_1;
-
-    // 设置 FIN 超时监测
-    set_timeout(3, FIN_RETRY);
-
-    // TIME_WAIT
-    while(sock->state != TIME_WAIT){
-        if(retry[FIN_RETRY]){
-            // 重传 FIN
-            send_flags(sock, FIN_FLAG_MASK);
-            set_timeout(3, FIN_RETRY);
-            printf("%s(active) retransimit FIN!\n", hostname);
+    // 主动关闭
+    if(sock->state == ESTABLISHED){
+        // 发送FIN
+        send_flags(sock, FIN_FLAG_MASK | ACK_FLAG_MASK);
+        printf("%s(active) sent FINACK!\n", hostname);
+        pthread_mutex_lock(&sock->state_lock);
+        sock->state = FIN_WAIT_1;
+        pthread_mutex_unlock(&sock->state_lock);
+        // 设置 FIN 超时监测
+        set_timeout(3, FIN_RETRY);
+        // 等待接收到FINACK
+        while(sock->state != TIME_WAIT){
+            if(retry[FINACK_RETRY]){
+                // 重传未收到ack的数据
+                // 重传 FINACK
+                send_flags(sock, ACK_FLAG_MASK | FIN_FLAG_MASK);
+                set_timeout(3, FINACK_RETRY);
+                printf("%s(active) retransimit FINACK!\n", hostname);
+            }
+            if(retry[ACK_RETRY]){
+                // 同时关闭连接可能需要重传ACK
+                send_flags(sock, ACK_FLAG_MASK | FIN_FLAG_MASK);
+                set_timeout(3, FINACK_RETRY);
+                printf("%s(active) retransimit FINACK!\n", hostname);
+            }
         }
+        // 等待 2 * MSL
+        sleep(2 * MSL);
+        // 关闭
+        pthread_mutex_lock(&sock->state_lock);
+        sock->state = CLOSED;
+        pthread_mutex_unlock(&sock->state_lock);
+        printf("%s(active) closed!\n", hostname);
     }
-
-    // 等待 2 * MSL
-    set_timeout(2 * MSL, 0);
-    printf("%s closed!\n", hostname);
-
+    // 被动关闭
+    else{
+        while(sock->state != CLOSED){
+            if(retry[ACK_RETRY]){
+                // 重传 ACK
+                send_flags(sock, ACK_FLAG_MASK);
+                set_timeout(3, ACK_RETRY);
+                printf("%s(passive) retransimit ACK!\n", hostname);
+            }
+            if(retry[FINACK_RETRY]){
+                // 重传 FINACK
+                send_flags(sock, ACK_FLAG_MASK | FIN_FLAG_MASK);
+                set_timeout(3, FINACK_RETRY);
+                printf("%s(passive) retransimit FINACK!\n", hostname);
+            }
+        }
+        printf("%s(passive) closed!\n", hostname);
+    }
     return 0;
 }
 

@@ -102,6 +102,7 @@ typedef struct {
 // TJU_TCP 结构体 保存TJU_TCP用到的各种数据
 typedef struct {
 	int state; // TCP的状态
+	pthread_mutex_t state_lock;  // 用于防止用户线程和后台内核线程竞争
 
 	tju_sock_addr bind_addr; // 存放bind和listen时该socket绑定的IP和端口
 	tju_sock_addr established_local_addr; // 存放建立连接后 本机的 IP和端口

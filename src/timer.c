@@ -1,18 +1,20 @@
 #include "timer.h"
 
-int retry[5] = {0};
-pthread_mutex_t *retry_lock[5];
+int retry[6] = {0};
+pthread_mutex_t *retry_lock[6];
 
-static void (*timeout_check[5])(int) = {
+static void (*timeout_check[6])(int) = {
     NULL, 
     syn_timeout_check, 
     synack_timeout_check,
     ack_timeout_check,
     fin_timeout_check,
+    finack_timeout_check,
 };
 
 void init_retry(){
-    for(int i = 0; i < 5; i++){
+    for(int i = 0; i < 6; i++){
+        retry_lock[i] = (pthread_mutex_t*)(malloc(sizeof(pthread_mutex_t)));
         pthread_mutex_init(retry_lock[i], NULL);
     }
 }
@@ -58,4 +60,17 @@ void fin_timeout_check(int signal){
     pthread_mutex_lock(retry_lock[FIN_RETRY]);
     retry[FIN_RETRY] = 1;
     pthread_mutex_unlock(retry_lock[FIN_RETRY]);
+}
+
+void finack_timeout_check(int signal){
+    pthread_mutex_lock(retry_lock[FINACK_RETRY]);
+    retry[FINACK_RETRY] = 1;
+    pthread_mutex_unlock(retry_lock[FINACK_RETRY]);
+}
+
+void destroy_retry(){
+    for(int i = 0; i < 6; i++){
+        pthread_mutex_destroy(retry_lock[i]);
+        free(retry_lock[i]);
+    }
 }

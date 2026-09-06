@@ -5,16 +5,21 @@
 #define SYNACK_RETRY 2
 #define ACK_RETRY 3
 #define FIN_RETRY 4
+#define FINACK_RETRY 5
 
 // 最大报文生存时间
 #define MSL 3
 
 #include "global.h"
 
-extern int retry[5];
-extern pthread_mutex_t* retry_lock[5];
+extern int retry[6];
+extern pthread_mutex_t* retry_lock[6];
 
-static void (*timeout_check[5])(int);
+static void (*timeout_check[6])(int);
+
+void init_retry();
+
+void destroy_retry();
 
 void set_timeout(int sec, int re_num);
 
@@ -27,5 +32,7 @@ void synack_timeout_check(int signal);
 void ack_timeout_check(int signal);
 
 void fin_timeout_check(int signal);
+
+void finack_timeout_check(int signal);
 
 #endif

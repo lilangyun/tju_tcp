@@ -44,10 +44,8 @@ int main(int argc, char **argv) {
     tju_recv(new_conn, (void*)buf, 10);
     printf("server recv %s\n", buf);
 
-    sleep(3);
-    tju_close(new_conn);
-
-    sleep(3);
+    // tju_close(new_conn);
+    sleep(10);
 
     return EXIT_SUCCESS;
 }
