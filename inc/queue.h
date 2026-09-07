@@ -1,5 +1,5 @@
-#ifndef QUEUE_H
-#define QUEUE_H
+#ifndef _QUEUE_H_
+#define _QUEUE_H_
 
 #include "global.h"
 #include "kernel.h"

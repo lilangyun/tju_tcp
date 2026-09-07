@@ -53,38 +53,48 @@
 #define CONGESTION_AVOIDANCE 1
 #define FAST_RECOVERY 2
 
+// TCP 发送窗口大小
+#define TCP_SENDWN_SIZE (32 * MAX_DLEN)
+
 // TCP 接受窗口大小
-#define TCP_RECVWN_SIZE 32*MAX_DLEN // 比如最多放32个满载数据包
+#define TCP_RECVWN_SIZE (32 * MAX_DLEN) // 比如最多放32个满载数据包
 
 // TCP 发送窗口
 // 注释的内容如果想用就可以用 不想用就删掉 仅仅提供思路和灵感
 typedef struct {
 	uint16_t window_size;
+  	uint32_t baseseq;
+	int base;  // baseseq对应发送缓冲区数组下标
+	uint32_t nextseq;
+	int next;  // nextseq对应发送缓冲区数组下标
+	int used;  // 缓冲区中未ACK的数据大小，不可以存储新的发送数据
+  	struct timeval timeout;
 
-	// 以下是初始时注释内容
-  	uint32_t base;
-  	uint32_t nextseq;
-  	// uint32_t estmated_rtt;
+	// uint32_t estmated_rtt;
   	// int ack_cnt;
   	// pthread_mutex_t ack_cnt_lock;
   	// struct timeval send_time;
-  	struct timeval timeout;
   	// uint16_t rwnd;
   	// int congestion_status;
   	// uint16_t cwnd;
-  	// uint16_t ssthresh; 
+  	// uint16_t ssthresh;
 } sender_window_t;
 
 // TCP 接收窗口
 // 注释的内容如果想用就可以用 不想用就删掉 仅仅提供思路和灵感
 typedef struct {
-	char received[TCP_RECVWN_SIZE];
+	uint16_t window_size;
+	uint32_t expect_seq;
+	int expect;  // expectseq对应接收缓冲区数组下标
+	uint32_t head_seq;
+	int head;  // 用户未读取的缓冲区起始下标
+	int has_new_data;  // recv 函数唤醒条件
+	pthread_mutex_t cond_lock;  // 保护条件 has_new_data 的互斥锁
 
-	// 以下是初始时注释内容
+	// char received[TCP_RECVWN_SIZE];
 	// received_packet_t* head;
 	// char buf[TCP_RECVWN_SIZE];
 	// uint8_t marked[TCP_RECVWN_SIZE];
-	uint32_t expect_seq;
 } receiver_window_t;
 
 // TCP 窗口 每个建立了连接的TCP都包括发送和接受两个窗口
@@ -116,10 +126,12 @@ typedef struct {
 	char* received_buf; // 接收数据缓存区
 	int received_len; // 接收数据缓存长度
 
-	pthread_cond_t wait_cond; // 可以被用来唤醒recv函数调用时等待的线程
+	pthread_cond_t wait_cond; // 唤醒recv函数调用时等待的线程
 
 	window_t window; // 发送和接受窗口
 
 } tju_tcp_t;
+
+
 
 #endif

@@ -1,6 +1,9 @@
-#ifndef TIMER_H
-#define TIMER_H
+#ifndef _TIMER_H_
+#define _TIMER_H_
 
+#include "global.h"
+
+// 连接管理重传对应Flags
 #define SYN_RETRY 1
 #define SYNACK_RETRY 2
 #define ACK_RETRY 3
@@ -9,8 +12,6 @@
 
 // 最大报文生存时间
 #define MSL 3
-
-#include "global.h"
 
 extern int retry[6];
 extern pthread_mutex_t* retry_lock[6];
