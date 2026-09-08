@@ -17,12 +17,15 @@ tju_tcp_t* tju_socket(){
     pthread_mutex_init(&(sock->recv_lock), NULL);
     sock->received_buf = (char*)(malloc(RECV_BUF_SIZE * sizeof(char)));
     sock->received_len = RECV_BUF_SIZE;
-    
-    if(pthread_cond_init(&sock->wait_cond, NULL) != 0){
-        perror("ERROR condition variable not set\n");
-        exit(-1);
-    }
+    sock->send_thread_id = 0;
 
+    /* 目前使用忙等待阻塞方式
+    * if(pthread_cond_init(&sock->wait_cond, NULL) != 0){
+    *     perror("ERROR condition variable not set\n");
+    *     exit(-1);
+    * }
+    */ 
+    
     sock->window.wnd_send = NULL;
     sock->window.wnd_recv = NULL;
 
@@ -87,12 +90,14 @@ tju_tcp_t* tju_accept(tju_tcp_t* listen_sock){
     tju_tcp_t* new_conn = new_conn_node->sock;
 
     // 连接已建立，启动发送和重传线程
-    pthread_t pid_send, pid_retry;
+    pthread_t pid_send = 1895;
+    pthread_t pid_retry = 1896;
     int rst = pthread_create(&pid_send, NULL, send_thread, (void*)(new_conn));
     if (rst<0){
         printf("ERROR create send_thread!\n");
         exit(-1);
     }
+    new_conn->send_thread_id = pid_send;
     // rst = pthread_create(&pid_retry, NULL, retry_thread, (void*)(new_conn));
     // if (rst<0){
     //     printf("ERROR create retry_thread!\n");
@@ -127,8 +132,6 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     // 初始化 window
     sock->window.wnd_send = (sender_window_t *)(malloc(sizeof(sender_window_t)));
     sock->window.wnd_recv = (receiver_window_t *)(malloc(sizeof(receiver_window_t)));
-    pthread_mutex_init(&(sock->window.wnd_recv->cond_lock), NULL);
-    sock->window.wnd_recv->has_new_data = 0;
     sock->window.wnd_send->window_size = TCP_SENDWN_SIZE;
     sock->window.wnd_recv->window_size = TCP_RECVWN_SIZE;
     sock->window.wnd_send->baseseq = seq;
@@ -169,12 +172,14 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     }
 
     // 连接已建立，启动发送和重传线程
-    pthread_t pid_send, pid_retry;
+    pthread_t pid_send = 1895;
+    pthread_t pid_retry = 1896;
     int rst = pthread_create(&pid_send, NULL, send_thread, (void*)(sock));
     if (rst<0){
         printf("ERROR create send_thread!\n");
         exit(-1);
     }
+    sock->send_thread_id = pid_send;
     // rst = pthread_create(&pid_retry, NULL, retry_thread, (void*)(sock));
     // if (rst<0){
     //     printf("ERROR create retry_thread!\n");
@@ -193,11 +198,11 @@ int tju_send(tju_tcp_t* sock, const void *buffer, int len){
     int buf_used = sock->window.wnd_send->used;
     int buf_size = sock->sending_len;
     int buf_avail = buf_size - buf_used;  // 缓冲区可用空间
-    int write_pos = (buf_base < 0)? 0: (buf_base + buf_used) % buf_size;
-    printf("[SEND]: I write %d byte data in %d.\n",len,  write_pos);
+    int write_pos = (buf_base < 0)? buf_used: (buf_base + buf_used) % buf_size;
 
     if(buf_avail < len){
         printf("Now the sending_buf only has %d bytes!\n", buf_avail);
+        pthread_mutex_unlock(&(sock->send_lock));
         return -1;
     }
 
@@ -214,18 +219,14 @@ int tju_send(tju_tcp_t* sock, const void *buffer, int len){
     sock->window.wnd_send->used += len;
 
     pthread_mutex_unlock(&(sock->send_lock));
+    printf("[User]: Send function wrote %d byte data in %d.\n",len, write_pos);
     
-    return 0;
+    return len;
 }
 int tju_recv(tju_tcp_t* sock, void *buffer, int len){
 
-    // 等待被唤醒
-    pthread_mutex_lock(&(sock->window.wnd_recv->cond_lock));
-    while(!(sock->window.wnd_recv->has_new_data)){
-        pthread_cond_wait(&(sock->wait_cond), &(sock->window.wnd_recv->cond_lock));
-    }
-    sock->window.wnd_recv->has_new_data = 0;
-    pthread_mutex_unlock(&(sock->window.wnd_recv->cond_lock));
+    // 等待有数据可读
+    while(sock->window.wnd_recv->expect == sock->window.wnd_recv->head){}
 
     // 用户处理缓冲区数据
     while(pthread_mutex_lock(&(sock->recv_lock)) != 0); // 加锁
@@ -237,7 +238,7 @@ int tju_recv(tju_tcp_t* sock, void *buffer, int len){
     int noread_len = (end_index - head_index + buf_size) % buf_size;
     int read_len = (noread_len < len)? noread_len: len;
     if(head_index + read_len <= buf_size){
-        memcpy(buffer, sock->received_buf, read_len);
+        memcpy(buffer, sock->received_buf + head_index, read_len);
     }
     else{
         int len1 = buf_size - head_index;
@@ -245,6 +246,7 @@ int tju_recv(tju_tcp_t* sock, void *buffer, int len){
         memcpy(buffer, sock->received_buf + head_index, len1);
         memcpy(buffer + len1, sock->received_buf, len2);
     }
+    printf("[User]: Recv function have memcpy buf_data into dest_memory.\n");
     
     // 更新 head
     sock->window.wnd_recv->head = (sock->window.wnd_recv->head + read_len) % buf_size;
@@ -272,10 +274,13 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     // 获取主机名，便于日志记录
     char hostname[8];
     gethostname(hostname, 8);
-    
+
+    pthread_mutex_lock(&(sock->state_lock));
+
     /*##################################### 连接管理 ###########################################*/
     // Receiver: [server], Flags: [SYN]
     if(sock->state == LISTEN && data_len == 0 && flags == SYN_FLAG_MASK){
+        pthread_mutex_unlock(&(sock->state_lock));
 
         // 新建socket: new_conn
         tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
@@ -293,8 +298,6 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         // 初始化 window -> 用于用户线程重传 SYNACK
         new_conn->window.wnd_send = (sender_window_t*)(malloc(sizeof(sender_window_t)));
         new_conn->window.wnd_recv = (receiver_window_t*)(malloc(sizeof(receiver_window_t)));
-        pthread_mutex_init(&(new_conn->window.wnd_recv->cond_lock), NULL);
-        new_conn->window.wnd_recv->has_new_data = 0;
         new_conn->window.wnd_send->window_size = TCP_SENDWN_SIZE;
         new_conn->window.wnd_recv->window_size = TCP_RECVWN_SIZE;
         new_conn->window.wnd_send->baseseq = server_isn;
@@ -335,6 +338,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     }
     // Receiver: [client], Flags: [SYN + ACK]
     else if(sock->state == SYN_SENT && data_len == 0 && flags == (SYN_FLAG_MASK | ACK_FLAG_MASK)){
+        pthread_mutex_unlock(&(sock->state_lock));
 
         // 取消 SYN 超时检测
         stop_timeout(SYN_RETRY);
@@ -352,7 +356,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         sock->window.wnd_recv->expect_seq = seq + 1;
         sock->window.wnd_recv->expect = 0;
         sock->window.wnd_send->used = 0;
-        sock->window.wnd_recv->head = -1;  // 无有效数据
+        sock->window.wnd_recv->head = 0;
 
         // 发送ACK
         send_flags(sock, ACK_FLAG_MASK);
@@ -379,7 +383,8 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     }
     // Receiver: [client], Flags: [SYN + ACK]  /* 收到重复 SYNACK */
     else if(sock->state == ESTABLISHED && data_len == 0 && flags == (SYN_FLAG_MASK | ACK_FLAG_MASK)){
-        
+        pthread_mutex_unlock(&(sock->state_lock));
+
         // 取消 ACK 超时检测
         stop_timeout(ACK_RETRY);
 
@@ -394,10 +399,17 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     }
     // Receiver: [server], Flags: [ACK]
     else if(sock->state == SYN_RECV && data_len == 0 && flags == ACK_FLAG_MASK){
-        
+        pthread_mutex_unlock(&(sock->state_lock));
+
         // 设置窗口
+        sock->window.wnd_send->baseseq = ack_num;
+	    sock->window.wnd_send->base = -1;
+        sock->window.wnd_send->nextseq = ack_num;
+	    sock->window.wnd_send->next = 0;
+        sock->window.wnd_recv->expect_seq = seq + 1;
+        sock->window.wnd_recv->expect = 0;
         sock->window.wnd_send->used = 0;
-        sock->window.wnd_recv->head = -1;
+        sock->window.wnd_recv->head = 0;
 
         // 取消 SYN + ACK 超时检测
         stop_timeout(SYNACK_RETRY);
@@ -431,34 +443,30 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     /* ################################# 四次挥手状态机开始 #######################################*/
     // Receiver: [Passive], Flags: [ACK | FIN]
     else if((sock->state == ESTABLISHED) && data_len == 0 && flags == (FIN_FLAG_MASK | ACK_FLAG_MASK)){
-
         // 设置 window
         sock->window.wnd_send->window_size = 1;
         sock->window.wnd_send->baseseq = ack_num;
         sock->window.wnd_send->nextseq = ack_num;
         sock->window.wnd_recv->expect_seq = seq + 1;
 
-        // 发送 ACK
+        // 本分支进入时仍持有 state_lock，需要把“读到 ESTABLISHED”和“进入被动关闭”
+        // 作为一个原子动作，避免 tju_close 同时把自己当成主动关闭方。
+        // 先回 ACK，再进入 CLOSE_WAIT；随后发送本端 FIN 并进入 LAST_ACK。
         send_flags(sock, (ACK_FLAG_MASK));
         printf("%s(passive) sent ACK!\n", hostname);
-        pthread_mutex_lock(&sock->state_lock);
         sock->state = CLOSE_WAIT;
-        pthread_mutex_unlock(&sock->state_lock);
 
-        // 避免状态转移过快接收方只能处理一个packet
-        // sleep(2);
-
-        // 发送 FINACK
         send_flags(sock, (ACK_FLAG_MASK | FIN_FLAG_MASK));
         printf("%s(passive) sent FINACK!\n", hostname);
-        pthread_mutex_lock(&sock->state_lock);
         sock->state = LAST_ACK;
-        pthread_mutex_unlock(&sock->state_lock);
+        set_timeout(3, FINACK_RETRY);
+        pthread_mutex_unlock(&(sock->state_lock));
 
         return 0;
     }
     // Receiver: [Active], Flags: [ACK]
     else if((sock->state == FIN_WAIT_1) && data_len == 0 && flags == (ACK_FLAG_MASK)){
+        pthread_mutex_unlock(&(sock->state_lock));
 
         // 取消FINACK超时监控
         stop_timeout(FINACK_RETRY);
@@ -472,6 +480,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     }
     // Receiver: [Active], Flags: [ACK | FIN]
     else if(sock->state == FIN_WAIT_2 && data_len == 0 && flags == (FIN_FLAG_MASK | ACK_FLAG_MASK)){
+        pthread_mutex_unlock(&(sock->state_lock));
 
         // 取消FINACK超时监控
         stop_timeout(FINACK_RETRY);
@@ -493,17 +502,30 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     }
     // Receiver: [Passive], Flags: [ACK]
     else if(sock->state == LAST_ACK && data_len == 0 && flags == ACK_FLAG_MASK){
+        // pthread_mutex_unlock(&(sock->state_lock));
 
-        // 关闭
-        pthread_mutex_lock(&sock->state_lock);
+        // 最终 ACK 到达，被动关闭结束，停掉 FINACK 重传计时后再释放连接。
+        stop_timeout(FINACK_RETRY);
+
+        // pthread_mutex_lock(&sock->state_lock);
         sock->state = CLOSED;
         pthread_mutex_unlock(&sock->state_lock);
 
         return 0;
     }
+    // Receiver: [Active], Flags: [FINACK]   /* TIME_WAIT 期间收到重复 FINACK */
+    else if(sock->state == TIME_WAIT && data_len == 0 && flags == (FIN_FLAG_MASK | ACK_FLAG_MASK)){
+        pthread_mutex_unlock(&(sock->state_lock));
+        // 最终 ACK 可能已经丢失，对端仍停留在 LAST_ACK 并重传 FINACK。
+        // 本端在 TIME_WAIT 中应再次发送 ACK，否则对端会一直重传。
+        send_flags(sock, (ACK_FLAG_MASK));
+        printf("%s(active) retransmit ACK in TIME_WAIT!\n", hostname);
+        return 0;
+    }
     /*################################### 同时关闭连接 #######################################*/
     // Receiver: [peer], Flags: [FINACK]
     else if(sock->state == FIN_WAIT_1 && data_len == 0 && flags == (FIN_FLAG_MASK | ACK_FLAG_MASK)){
+        pthread_mutex_unlock(&(sock->state_lock));
 
         // 取消 FINACK 计时
         stop_timeout(FINACK_RETRY);
@@ -528,6 +550,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     }
     // Receiver: [peer], Flags: [ACK]
     else if(sock->state == CLOSING && data_len == 0 && flags == ACK_FLAG_MASK){
+        pthread_mutex_unlock(&(sock->state_lock));
         stop_timeout(ACK_RETRY);
         pthread_mutex_lock(&sock->state_lock);
         sock->state = TIME_WAIT;
@@ -535,27 +558,47 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         return 0;
     /*################################### 连接管理结束 #######################################*/
     }
-    /*################################# 数据发送端处理ACK #####################################*/
+    /*################################# 数据发送端处理ACK ####################################*/
     else if(sock->state == ESTABLISHED && data_len == 0 && flags == ACK_FLAG_MASK){
-        int ack_quantity = ack_num - sock->window.wnd_send->baseseq;
+        pthread_mutex_unlock(&(sock->state_lock));
+        uint32_t base_seq = sock->window.wnd_send->baseseq;
+        uint32_t next_seq = sock->window.wnd_send->nextseq;
         int buf_size = sock->sending_len;
+        int ack_quantity = 0;
+        if(ack_num > base_seq && ack_num <= next_seq){
+            ack_quantity = ack_num - base_seq;
+        }
+        else if(next_seq < base_seq && ack_num <= next_seq){
+            ack_quantity = (SEQ_MAX - base_seq) + ack_num;
+        }
+        
         // 更新 base, baseseq
-        if(sock->window.wnd_send->baseseq < ack_num){
+        if(ack_quantity > 0){
             sock->window.wnd_send->used -= ack_quantity;
             sock->window.wnd_send->base = (sock->window.wnd_send->base + ack_quantity) % buf_size;
             sock->window.wnd_send->baseseq = ack_num;  // 累计确认
+            printf("[Kernel]: Received the ACK to the %d.\n", ack_num);
         }
         return 0;
     }
 
+    pthread_mutex_unlock(&(sock->state_lock));
+
     // 返回值非0，说明需要加锁失败，要一直尝试加锁
     while(pthread_mutex_lock(&(sock->recv_lock)) != 0); // 加锁
+
+    // printf("[DEBUG]: I got recv->lock.\n");
 
     // 缓冲区仅仅复制接收窗口大小的数据
     uint16_t win_size = sock->window.wnd_recv->window_size;
     uint32_t buf_size = sock->received_len;
     int expect_index = sock->window.wnd_recv->expect;
     uint32_t putlen = (win_size < data_len)? win_size: data_len;
+
+    if(putlen == 0){
+        pthread_mutex_unlock(&(sock->recv_lock)); // 解锁
+        return 0;
+    }
     
     if(expect_index + putlen <= buf_size){
         memcpy(sock->received_buf + expect_index, pkt + DEFAULT_HEADER_LEN, putlen);
@@ -572,12 +615,13 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     sock->window.wnd_recv->expect_seq = seq + putlen;
     sock->window.wnd_recv->expect += putlen;  // 将来接收数据在缓冲区中的下标
     send_flags(sock, ACK_FLAG_MASK);
+    printf("[Kernel] Sent Ack to the %d.\n", seq + putlen);
     
     // 通知 recv 用户函数
-    pthread_mutex_lock(&(sock->window.wnd_recv->cond_lock));
-    sock->window.wnd_recv->has_new_data = 1;
-    pthread_cond_broadcast(&(sock->wait_cond));
-    pthread_mutex_unlock(&(sock->window.wnd_recv->cond_lock));
+    // pthread_mutex_lock(&(sock->window.wnd_recv->cond_lock));
+    // printf("[Kernel]: Waken the Recv function.\n");
+    // pthread_cond_broadcast(&(sock->wait_cond));
+    // pthread_mutex_unlock(&(sock->window.wnd_recv->cond_lock));
 
     return 0;
 }
@@ -587,19 +631,26 @@ int tju_close (tju_tcp_t* sock){
     char hostname[8];
     gethostname(hostname, 8);
 
-    // 主动关闭
-    if(sock->state == ESTABLISHED){
-        // 发送FIN
+    // 等待数据发送完毕
+    while(sock->window.wnd_send->used != 0);
+
+    pthread_mutex_lock(&(sock->state_lock));
+    int active_close = (sock->state == ESTABLISHED);
+    int has_locked = 1;
+    if(active_close){
+        // 在持有 state_lock 时抢到主动关闭角色、进入 FIN_WAIT_1 并发 FIN，
+        // 这样收包线程之后看到 FIN 时只能走同时关闭，而不会再次把自己当成被动关闭方。
+        sock->state = FIN_WAIT_1;
         send_flags(sock, (FIN_FLAG_MASK | ACK_FLAG_MASK));
         printf("%s(active) sent FINACK!\n", hostname);
-        pthread_mutex_lock(&sock->state_lock);
-        sock->state = FIN_WAIT_1;
-        pthread_mutex_unlock(&sock->state_lock);
-        // 设置 FINACK 超时监测
         set_timeout(3, FINACK_RETRY);
+    }
+    pthread_mutex_unlock(&(sock->state_lock));
 
-        // 等待接收到 FINACK
-        while(sock->state != TIME_WAIT){
+    // 主动关闭
+    if(active_close){
+        // 等待接收 FINACK；如果被动路径已经提前完成到 CLOSED，也不能继续无限等待。
+        while(sock->state != TIME_WAIT && sock->state != CLOSED){
             if(retry[FINACK_RETRY]){
                 // 重传 FINACK
                 send_flags(sock, (FIN_FLAG_MASK | ACK_FLAG_MASK));
@@ -621,16 +672,22 @@ int tju_close (tju_tcp_t* sock){
             }
         }
 
-        // 等待 2 * MSL
-        sleep(2 * MSL);
-        
-        // 关闭
+        // 主动方进入 TIME_WAIT 后先清掉关闭相关计时器，再等待 2 * MSL；
+        // 如果以 CLOSED 退出，也统一在这里清理。
+        if(sock->state == TIME_WAIT){
+            stop_timeout(FINACK_RETRY);
+            stop_timeout(ACK_RETRY);
+            sleep(2 * MSL);
+        }
+        stop_timeout(FINACK_RETRY);
+        stop_timeout(ACK_RETRY);
+
         pthread_mutex_lock(&sock->state_lock);
         sock->state = CLOSED;
         pthread_mutex_unlock(&sock->state_lock);
         printf("%s(active) closed!\n", hostname);
     }
-    // 被动关闭
+    // 被动关闭：本端是被动方，只需等待对端最终 ACK 后进入 CLOSED。
     else{
         while(sock->state != CLOSED){
             if(retry[ACK_RETRY]){
@@ -640,15 +697,22 @@ int tju_close (tju_tcp_t* sock){
                 printf("%s(passive) retransimit ACK!\n", hostname);
             }
             if(retry[FINACK_RETRY]){
-                // 重传 FINACK
+                // 被动方已发送 FINACK，仍未收到最终 ACK 时重传 FINACK。
                 send_flags(sock, (FIN_FLAG_MASK | ACK_FLAG_MASK));
                 set_timeout(3, FINACK_RETRY);
                 printf("%s(passive) retransimit FINACK!\n", hostname);
             }
         }
+        stop_timeout(FINACK_RETRY);
+        stop_timeout(ACK_RETRY);
         printf("%s(passive) closed!\n", hostname);
     }
-    
+
+    // 收回实际创建的发送线程，不能使用硬编码 pthread_t。
+    if(sock->send_thread_id != 0){
+        pthread_join(sock->send_thread_id, NULL);
+    }
+
     return 0;
 }
 
@@ -695,16 +759,16 @@ static void* send_thread(void* arg){
     tju_tcp_t* sock = (tju_tcp_t*)(arg);
     uint32_t seq, ack_num;
     int send_len, used, base_index, next_index;
-    int win_size, buf_size, noack_size, nosent_size, max_send_size, send_size;
+    int win_size, buf_size, noack_size, nosent_size, max_send_size, send_size, plen;
     char* data, *msg;
 
     while(1){
-        pthread_mutex_lock(&(sock->state_lock));
+        // pthread_mutex_lock(&(sock->state_lock));
         if(sock->state != ESTABLISHED){
-            pthread_mutex_unlock(&(sock->state_lock));
+            // pthread_mutex_unlock(&(sock->state_lock));
             break;
         }
-        pthread_mutex_unlock(&(sock->state_lock));
+        // pthread_mutex_unlock(&(sock->state_lock));
 
         pthread_mutex_lock(&(sock->send_lock));
         seq = sock->window.wnd_send->nextseq;
@@ -717,7 +781,6 @@ static void* send_thread(void* arg){
 
         if(used == 0){
             pthread_mutex_unlock(&(sock->send_lock));
-            usleep(100000);
             continue;
         }
 
@@ -739,17 +802,17 @@ static void* send_thread(void* arg){
             memcpy(data + len1, sock->sending_buf, len2);
         }
         else{
-            printf("send_size = %d, next_index = %d.\n", send_size, next_index);
+            pthread_mutex_unlock(&(sock->send_lock));
             continue;
         }
 
         /* 发包 */
+        plen = DEFAULT_HEADER_LEN + send_size;
         msg = create_packet_buf(sock->established_local_addr.port,
                 sock->established_remote_addr.port, seq, ack_num,
-                DEFAULT_HEADER_LEN, DEFAULT_HEADER_LEN + send_size,
+                DEFAULT_HEADER_LEN, plen,
                 NO_FLAG, 0, 0, data, send_size);
-        sendToLayer3(msg, send_size);
-
+        sendToLayer3(msg, plen);
         free(data);
 
         /* 更新窗口 */
@@ -759,6 +822,12 @@ static void* send_thread(void* arg){
         sock->window.wnd_send->nextseq = seq + send_size;
         sock->window.wnd_send->next = (next_index + send_size) % buf_size;
 
+        /* 日志 */
+        printf("[User] Sent pkt src=%d dst=%d flags=0x%x seq=%d ack=%d.\n",
+            sock->established_local_addr.port, sock->established_remote_addr.port,
+            get_flags(msg), get_seq(msg), get_ack(msg));
+
+        /* 解锁 */
         pthread_mutex_unlock(&(sock->send_lock));
     }
 }

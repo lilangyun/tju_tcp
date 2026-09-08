@@ -88,8 +88,6 @@ typedef struct {
 	int expect;  // expectseq对应接收缓冲区数组下标
 	uint32_t head_seq;
 	int head;  // 用户未读取的缓冲区起始下标
-	int has_new_data;  // recv 函数唤醒条件
-	pthread_mutex_t cond_lock;  // 保护条件 has_new_data 的互斥锁
 
 	// char received[TCP_RECVWN_SIZE];
 	// received_packet_t* head;
@@ -126,9 +124,14 @@ typedef struct {
 	char* received_buf; // 接收数据缓存区
 	int received_len; // 接收数据缓存长度
 
-	pthread_cond_t wait_cond; // 唤醒recv函数调用时等待的线程
-
 	window_t window; // 发送和接受窗口
+
+	pthread_t send_thread_id; // 实际发送线程，用于 tju_close 时 join
+
+	/* 目前使用忙等待阻塞方式
+	* pthread_cond_t wait_cond; // 唤醒recv函数调用时等待的线程
+	* pthread_mutex_t cond_lock;  // 条件变量必要互斥锁
+	*/
 
 } tju_tcp_t;
 
