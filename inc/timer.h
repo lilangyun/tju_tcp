@@ -13,14 +13,9 @@
 // 最大报文生存时间
 #define MSL 3
 
-extern int retry[6];
-extern pthread_mutex_t* retry_lock[6];
+extern volatile sig_atomic_t retry[6];
 
 static void (*timeout_check[6])(int);
-
-void init_retry();
-
-void destroy_retry();
 
 void set_timeout(int sec, int re_num);
 

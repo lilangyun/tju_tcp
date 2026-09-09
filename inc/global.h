@@ -60,15 +60,11 @@
 #define TCP_RECVWN_SIZE (32 * MAX_DLEN) // 比如最多放32个满载数据包
 
 // TCP 发送窗口
-// 注释的内容如果想用就可以用 不想用就删掉 仅仅提供思路和灵感
 typedef struct {
-	uint16_t window_size;
-  	uint32_t baseseq;
-	int base;  // baseseq对应发送缓冲区数组下标
-	uint32_t nextseq;
-	int next;  // nextseq对应发送缓冲区数组下标
-	int used;  // 缓冲区中未ACK的数据大小，不可以存储新的发送数据
-  	struct timeval timeout;
+	uint16_t window_size;  // 窗口大小
+  	uint32_t base_seq;     // 已经发送出去，但是没有ACK的首个Seq
+	uint32_t next_seq;     // 仍未发送出去，但是准备发送的首个Seq
+  	struct timeval timeout;  // 记录发送出去，但是没有ACK的全部数据的超时时间
 
 	// uint32_t estmated_rtt;
   	// int ack_cnt;
@@ -81,13 +77,9 @@ typedef struct {
 } sender_window_t;
 
 // TCP 接收窗口
-// 注释的内容如果想用就可以用 不想用就删掉 仅仅提供思路和灵感
 typedef struct {
-	uint16_t window_size;
-	uint32_t expect_seq;
-	int expect;  // expectseq对应接收缓冲区数组下标
-	uint32_t head_seq;
-	int head;  // 用户未读取的缓冲区起始下标
+	uint16_t window_size; // 窗口大小
+	uint32_t expect_seq;  // 接收方内核下一个想要接收的Seq
 
 	// char received[TCP_RECVWN_SIZE];
 	// received_packet_t* head;
@@ -95,19 +87,32 @@ typedef struct {
 	// uint8_t marked[TCP_RECVWN_SIZE];
 } receiver_window_t;
 
-// TCP 窗口 每个建立了连接的TCP都包括发送和接受两个窗口
-typedef struct {
-	sender_window_t* wnd_send;
-  	receiver_window_t* wnd_recv;
-} window_t;
-
 typedef struct {
 	uint32_t ip;
 	uint16_t port;
 } tju_sock_addr;
 
+typedef struct {
+    pthread_mutex_t lock; // 发送数据锁
+	char* mem; // 发送数据缓存区
+	int capacity; // 发送数据缓存容量
 
-// TJU_TCP 结构体 保存TJU_TCP用到的各种数据
+	sender_window_t* wnd;
+    int base;  // 内核在缓冲区重传旧数据处
+    int next;  // 内核在缓冲区发送新数据处
+    int store;  // 用户在缓冲区中存放新数据处
+}send_buf_t;
+
+typedef struct {
+    pthread_mutex_t lock; // 接收缓冲区数据锁
+	char* mem; // 接收数据缓存区
+	int capacity; // 接收数据缓存容量
+
+	receiver_window_t* wnd;
+	int head;    // 用户下一个读入位置
+    int expect;  // 内核在缓冲区存放新数据处
+}recv_buf_t;
+
 typedef struct {
 	int state; // TCP的状态
 	pthread_mutex_t state_lock;  // 用于防止用户线程和后台内核线程竞争
@@ -116,22 +121,10 @@ typedef struct {
 	tju_sock_addr established_local_addr; // 存放建立连接后 本机的 IP和端口
 	tju_sock_addr established_remote_addr; // 存放建立连接后 连接对方的 IP和端口
 
-	pthread_mutex_t send_lock; // 发送数据锁
-	char* sending_buf; // 发送数据缓存区
-	int sending_len; // 发送数据缓存长度
+	send_buf_t* send_buf;
+	recv_buf_t* recv_buf;
 
-	pthread_mutex_t recv_lock; // 接收数据锁
-	char* received_buf; // 接收数据缓存区
-	int received_len; // 接收数据缓存长度
-
-	window_t window; // 发送和接受窗口
-
-	pthread_t send_thread_id; // 实际发送线程，用于 tju_close 时 join
-
-	/* 目前使用忙等待阻塞方式
-	* pthread_cond_t wait_cond; // 唤醒recv函数调用时等待的线程
-	* pthread_mutex_t cond_lock;  // 条件变量必要互斥锁
-	*/
+	pthread_t send_thread_id;
 
 } tju_tcp_t;
 

@@ -1,7 +1,6 @@
 #include "timer.h"
 
-int retry[6] = {0};
-pthread_mutex_t *retry_lock[6];
+volatile sig_atomic_t retry[6] = {0};
 
 static void (*timeout_check[6])(int) = {
     NULL, 
@@ -12,18 +11,9 @@ static void (*timeout_check[6])(int) = {
     finack_timeout_check,
 };
 
-void init_retry(){
-    for(int i = 0; i < 6; i++){
-        retry_lock[i] = (pthread_mutex_t*)(malloc(sizeof(pthread_mutex_t)));
-        pthread_mutex_init(retry_lock[i], NULL);
-    }
-}
-
 void set_timeout(int sec, int re_num){
     signal(SIGALRM, timeout_check[re_num]);
-    pthread_mutex_lock(retry_lock[re_num]);
     retry[re_num] = 0;
-    pthread_mutex_unlock(retry_lock[re_num]);
     struct timeval timeout = {sec, 0};
     struct itimerval timer = {0};
     timer.it_value = timeout;
@@ -31,46 +21,27 @@ void set_timeout(int sec, int re_num){
 }
 
 void stop_timeout(int re_num){
-    pthread_mutex_lock(retry_lock[re_num]);
     retry[re_num] = 0;
-    pthread_mutex_unlock(retry_lock[re_num]);    
     struct itimerval timer = {0};
     setitimer(ITIMER_REAL, &timer, NULL);
 }
 
 void syn_timeout_check(int signal){
-    pthread_mutex_lock(retry_lock[SYN_RETRY]);
     retry[SYN_RETRY] = 1;
-    pthread_mutex_unlock(retry_lock[SYN_RETRY]);
 }
 
 void synack_timeout_check(int signal){
-    pthread_mutex_lock(retry_lock[SYNACK_RETRY]);
     retry[SYNACK_RETRY] = 1;
-    pthread_mutex_unlock(retry_lock[SYNACK_RETRY]);
 }
 
 void ack_timeout_check(int signal){
-    pthread_mutex_lock(retry_lock[ACK_RETRY]);
     retry[ACK_RETRY] = 1;
-    pthread_mutex_unlock(retry_lock[ACK_RETRY]);
 }
 
 void fin_timeout_check(int signal){
-    pthread_mutex_lock(retry_lock[FIN_RETRY]);
     retry[FIN_RETRY] = 1;
-    pthread_mutex_unlock(retry_lock[FIN_RETRY]);
 }
 
 void finack_timeout_check(int signal){
-    pthread_mutex_lock(retry_lock[FINACK_RETRY]);
     retry[FINACK_RETRY] = 1;
-    pthread_mutex_unlock(retry_lock[FINACK_RETRY]);
-}
-
-void destroy_retry(){
-    for(int i = 0; i < 6; i++){
-        pthread_mutex_destroy(retry_lock[i]);
-        free(retry_lock[i]);
-    }
 }
