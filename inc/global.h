@@ -54,10 +54,12 @@
 #define FAST_RECOVERY 2
 
 // TCP 发送窗口大小
-#define TCP_SENDWN_SIZE (32 * MAX_DLEN)
+// #define TCP_SENDWN_SIZE (3200 * MAX_DLEN)
+#define TCP_SENDWN_SIZE (SEND_BUF_SIZE)
 
 // TCP 接受窗口大小
-#define TCP_RECVWN_SIZE (32 * MAX_DLEN) // 比如最多放32个满载数据包
+// #define TCP_RECVWN_SIZE (3200 * MAX_DLEN) // 比如最多放32个满载数据包
+#define TCP_RECVWN_SIZE (RECV_BUF_SIZE) // 比如最多放32个满载数据包
 
 // TCP 发送窗口
 typedef struct {
@@ -96,8 +98,6 @@ typedef struct {
     pthread_mutex_t lock; // 发送数据锁
 	char* mem; // 发送数据缓存区
 	int capacity; // 发送数据缓存容量
-
-	sender_window_t* wnd;
     int base;  // 内核在缓冲区重传旧数据处
     int next;  // 内核在缓冲区发送新数据处
     int store;  // 用户在缓冲区中存放新数据处
@@ -107,8 +107,6 @@ typedef struct {
     pthread_mutex_t lock; // 接收缓冲区数据锁
 	char* mem; // 接收数据缓存区
 	int capacity; // 接收数据缓存容量
-
-	receiver_window_t* wnd;
 	int head;    // 用户下一个读入位置
     int expect;  // 内核在缓冲区存放新数据处
 }recv_buf_t;
@@ -117,12 +115,20 @@ typedef struct {
 	int state; // TCP的状态
 	pthread_mutex_t state_lock;  // 用于防止用户线程和后台内核线程竞争
 
+	uint32_t local_isn;  // 本地初始序号
+	uint32_t remote_isn;  // 远程初始序号
+	uint32_t local_fin_seq;  // 本地发FIN时的Seq
+	uint32_t remote_fin_seq; // 远程发FIN时的Seq
+
 	tju_sock_addr bind_addr; // 存放bind和listen时该socket绑定的IP和端口
 	tju_sock_addr established_local_addr; // 存放建立连接后 本机的 IP和端口
 	tju_sock_addr established_remote_addr; // 存放建立连接后 连接对方的 IP和端口
 
 	send_buf_t* send_buf;
 	recv_buf_t* recv_buf;
+
+	sender_window_t* send_wnd;
+	receiver_window_t* recv_wnd;
 
 	pthread_t send_thread_id;
 

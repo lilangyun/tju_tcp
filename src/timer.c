@@ -1,12 +1,11 @@
 #include "timer.h"
 
-volatile sig_atomic_t retry[6] = {0};
+volatile sig_atomic_t retry[5] = {0};
 
-static void (*timeout_check[6])(int) = {
+static void (*timeout_check[5])(int) = {
     NULL, 
     syn_timeout_check, 
     synack_timeout_check,
-    ack_timeout_check,
     fin_timeout_check,
     finack_timeout_check,
 };
@@ -32,10 +31,6 @@ void syn_timeout_check(int signal){
 
 void synack_timeout_check(int signal){
     retry[SYNACK_RETRY] = 1;
-}
-
-void ack_timeout_check(int signal){
-    retry[ACK_RETRY] = 1;
 }
 
 void fin_timeout_check(int signal){

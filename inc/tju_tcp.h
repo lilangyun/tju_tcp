@@ -77,12 +77,13 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt);
 */
 
 // 用于单独发送三次握手的flags
-static int send_flags(tju_tcp_t* sock, uint8_t flags, int retry);
+static int send_flags(tju_tcp_t* sock, uint8_t flags, uint32_t seq_num, uint32_t ack_num);
 
 // 释放sock对应的连接资源
 static void free_sock(tju_tcp_t* sock);
 
-static void init_buf_wnd(tju_tcp_t* sock, uint32_t seq_num, uint32_t ack_num);
+// 初始化窗口
+static void init_buf_wnd(tju_tcp_t* sock);
 
 /*
 ######################## 线程函数 #########################
