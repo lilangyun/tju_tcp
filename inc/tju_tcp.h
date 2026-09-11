@@ -4,8 +4,8 @@
 #include "global.h"
 #include "tju_packet.h"
 #include "kernel.h"
-#include "queue.h"
-#include "timer.h"
+// #include "queue.h"
+// #include "timer.h"
 
 #define SERVER_IP "172.17.0.3"
 #define CLIENT_IP "172.17.0.2"
@@ -91,5 +91,94 @@ static void init_buf_wnd(tju_tcp_t* sock);
 
 // 发送线程
 static void* send_thread(void* arg);
+
+
+/*
+* ####################### 重传函数 #########################
+*/
+
+// 连接管理重传对应Flags
+#define SYN_RETRY 1
+#define SYNACK_RETRY 2
+#define FIN_RETRY 3
+#define FINACK_RETRY 4
+
+// 最大报文生存时间
+#define MSL 3
+
+static void (*timeout_check[5])(int);
+
+void set_timeout(int sec, int re_num);
+
+void stop_timeout(int re_num);
+
+void syn_timeout_check(int signal);
+
+void synack_timeout_check(int signal);
+
+void fin_timeout_check(int signal);
+
+void finack_timeout_check(int signal);
+
+// listen_socks的连接队列节点
+typedef struct conn_node{
+    tju_tcp_t* sock;
+    struct conn_node* next;
+}conn_node;
+
+// listen_socks的队列结构
+typedef struct conn_queue{
+    conn_node* front;
+    conn_node* rear;
+    pthread_mutex_t* lock;  // 每个connect queue都有自己的锁
+}conn_queue;
+
+#define MAX_SOCK 32
+
+/*
+################ 全连接队列辅助函数 #########################
+*/
+
+// 初始化队列
+int init_full_conn_queue(int listen_hashval);
+
+// 创建节点
+conn_node* create_conn_node(tju_tcp_t *new_conn);
+
+// 入队
+int push_full_conn_queue(int listen_hashval, conn_node* new_conn_node);
+
+// 出队
+conn_node* pop_full_conn_queue(int listen_hashval);
+
+// 销毁队列
+int destroy_full_conn_queue(int listen_hashval);
+
+// 判断非空
+int empty_full_conn_queue(int listen_hashval);
+/*
+################ 半连接队列辅助函数 ##########################
+*/
+// 初始化队列
+int init_half_conn_queue(int listen_hashval);
+
+// 入队
+int push_half_conn_queue(int listen_hashval, conn_node* new_conn_node);
+
+// 出队
+conn_node* pop_half_conn_queue(int listen_hashval);
+
+// 销毁队列
+int destroy_half_conn_queue(int listen_hashval);
+
+// 判断非空
+int empty_half_conn_queue(int listen_hashval);
+
+// 移除指定元素
+conn_node* remove_half_conn_queue(int listen_hashval, int conn_hashval);
+
+/*
+############################################################
+*/
 
 #endif
