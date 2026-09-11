@@ -55,11 +55,11 @@
 
 // TCP 发送窗口大小
 // #define TCP_SENDWN_SIZE (3200 * MAX_DLEN)
-#define TCP_SENDWN_SIZE (SEND_BUF_SIZE)
+#define TCP_SENDWN_SIZE (32 * SMSS)
 
 // TCP 接受窗口大小
 // #define TCP_RECVWN_SIZE (3200 * MAX_DLEN) // 比如最多放32个满载数据包
-#define TCP_RECVWN_SIZE (RECV_BUF_SIZE) // 比如最多放32个满载数据包
+#define TCP_RECVWN_SIZE (32 * SMSS) // 比如最多放32个满载数据包
 
 // TCP 发送窗口
 typedef struct {
