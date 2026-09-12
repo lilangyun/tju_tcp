@@ -34,8 +34,8 @@ int main(int argc, char **argv) {
 
     sleep(3);
     
-    tju_send(new_conn, "hello world", 12);
-    tju_send(new_conn, "hello tju", 10);
+    // tju_send(new_conn, "hello world", 12);
+    // tju_send(new_conn, "hello tju", 10);
 
     char buf[2021]; int rst;
     rst = tju_recv(new_conn, (void*)buf, 12);

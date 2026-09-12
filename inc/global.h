@@ -19,6 +19,11 @@
 // 信号处理
 #include <signal.h>
 
+// #define SERVER_IP "172.17.0.3"
+// #define CLIENT_IP "172.17.0.2"
+#define SERVER_IP "172.17.0.6"
+#define CLIENT_IP "172.17.0.5"
+
 // 单位是byte
 #define SIZE32 4
 #define SIZE16 2
@@ -66,12 +71,12 @@ typedef struct {
 	uint16_t window_size;  // 窗口大小
   	uint32_t base_seq;     // 已经发送出去，但是没有ACK的首个Seq
 	uint32_t next_seq;     // 仍未发送出去，但是准备发送的首个Seq
+	struct timeval send_time;  // 发送时间戳
   	struct timeval timeout;  // 记录发送出去，但是没有ACK的全部数据的超时时间
+  	int ack_cnt;	
+	int has_rtt_sample;  // 是否采集到RTT样本
 
 	// uint32_t estmated_rtt;
-  	// int ack_cnt;
-  	// pthread_mutex_t ack_cnt_lock;
-  	// struct timeval send_time;
   	// uint16_t rwnd;
   	// int congestion_status;
   	// uint16_t cwnd;
@@ -101,6 +106,8 @@ typedef struct {
     int base;  // 内核在缓冲区重传旧数据处
     int next;  // 内核在缓冲区发送新数据处
     int store;  // 用户在缓冲区中存放新数据处
+    int count;
+    pthread_cond_t cond;
 }send_buf_t;
 
 typedef struct {
@@ -109,6 +116,8 @@ typedef struct {
 	int capacity; // 接收数据缓存容量
 	int head;    // 用户下一个读入位置
     int expect;  // 内核在缓冲区存放新数据处
+    int count;   // 缓冲区中尚未被用户读取的字节数
+    pthread_cond_t cond;
 }recv_buf_t;
 
 typedef struct {
@@ -131,6 +140,7 @@ typedef struct {
 	receiver_window_t* recv_wnd;
 
 	pthread_t send_thread_id;
+	pthread_t retry_thread_id;
 
 } tju_tcp_t;
 
