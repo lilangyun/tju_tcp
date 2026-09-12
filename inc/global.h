@@ -19,10 +19,10 @@
 // 信号处理
 #include <signal.h>
 
-// #define SERVER_IP "172.17.0.3"
-// #define CLIENT_IP "172.17.0.2"
-#define SERVER_IP "172.17.0.6"
-#define CLIENT_IP "172.17.0.5"
+#define SERVER_IP "172.17.0.3"
+#define CLIENT_IP "172.17.0.2"
+// #define SERVER_IP "172.17.0.6"
+// #define CLIENT_IP "172.17.0.5"
 
 // 单位是byte
 #define SIZE32 4
