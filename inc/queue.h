@@ -17,9 +17,6 @@ typedef struct conn_queue{
     pthread_mutex_t* lock;  // 每个connect queue都有自己的锁
 }conn_queue;
 
-// kernel.h
-#define MAX_SOCK 32
-
 extern conn_queue* half_conn_queue[MAX_SOCK];  // 半连接队列
 extern conn_queue* full_conn_queue[MAX_SOCK];  // 全连接队列
 

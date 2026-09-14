@@ -1,4 +1,9 @@
 #include "kernel.h"
+#include "trace.h"
+
+tju_tcp_t* listen_socks[MAX_SOCK];
+tju_tcp_t* established_socks[MAX_SOCK];
+int BACKEND_UDPSOCKET_ID;
 /*
 模拟Linux内核收到一份TCP报文的处理函数
 */
@@ -19,9 +24,6 @@ void onTCPPocket(char* pkt){
         local_ip = inet_network(CLIENT_IP);
         remote_ip = inet_network(SERVER_IP);
     }
-
-    // printf("[Kernel] Received pkt src=%d dst=%d flags=0x%x seq=%d ack=%d datalen=%d.\n",
-    //     remote_port, local_port, get_flags(pkt), get_seq(pkt), get_ack(pkt), get_plen(pkt)-get_hlen(pkt));
 
     int hashval;
     // 根据4个ip port 组成四元组 查找有没有已经建立连接的socket
@@ -122,6 +124,8 @@ void* receive_thread(void* arg){
  然后创建新线程 不断调用该socket的recvfrom
 */
 void startSimulation(){
+    trace_init();
+
     // 对于内核 初始化监听socket哈希表和建立连接socket哈希表
     int index;
     for(index=0;index<MAX_SOCK;index++){

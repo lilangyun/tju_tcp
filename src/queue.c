@@ -205,8 +205,10 @@ conn_node* remove_half_conn_queue(int listen_hashval, int conn_hashval){
         exit(1);
     }
     while(it != NULL){
-        hashval = cal_hash(it->sock->established_local_addr.port, it->sock->established_local_addr.ip, 
-                    it->sock->established_remote_addr.port, it->sock->established_remote_addr.ip);
+        hashval = cal_hash(it->sock->established_local_addr.ip,
+                           it->sock->established_local_addr.port,
+                           it->sock->established_remote_addr.ip,
+                           it->sock->established_remote_addr.port);
         // printf("node_hash: %d, conn_hash: %d.\n", hashval, conn_hashval);
         if(hashval == conn_hashval){
             // match

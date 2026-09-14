@@ -1,12 +1,13 @@
 BUILD_DIR = ../build
 OBJS = $(BUILD_DIR)/tju_packet.o \
 	   $(BUILD_DIR)/kernel.o \
-	   $(BUILD_DIR)/tju_tcp.o \
-    #    $(BUILD_DIR)/timer.o \
-    # 	 $(BUILD_DIR)/queue.o \
-	#    $(BUILD_DIR)/timer.o \
-	#    $(BUILD_DIR)/SKB.o \
-	#    $(BUILD_DIR)/debug.o 
+	   $(BUILD_DIR)/queue.o \
+	   $(BUILD_DIR)/timer.o \
+	   $(BUILD_DIR)/rtt.o \
+	   $(BUILD_DIR)/flow_control.o \
+	   $(BUILD_DIR)/trace.o \
+	   $(BUILD_DIR)/tju_core.o \
+	   $(BUILD_DIR)/tju_tcp.o
 
 
 default:all

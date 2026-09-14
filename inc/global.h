@@ -1,46 +1,37 @@
 #ifndef _GLOBAL_H_
 #define _GLOBAL_H_
 
+#include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <sys/socket.h>
+#include <pthread.h>
+#include <signal.h>
 #include <stdint.h>
-#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include "global.h"
-#include <pthread.h>
 #include <sys/select.h>
-#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
 
-// 信号处理
-#include <signal.h>
-
-// #define SERVER_IP "172.17.0.3"
-// #define CLIENT_IP "172.17.0.2"
-#define SERVER_IP "172.17.0.6"
-#define CLIENT_IP "172.17.0.5"
-
-// 单位是byte
+/* 基本长度单位：字节。 */
 #define SIZE32 4
 #define SIZE16 2
 #define SIZE8  1
 
-// 一些Flag
+/* 常用布尔值和状态返回值。 */
 #define NO_FLAG 0
 #define NO_WAIT 1
 #define TIMEOUT 2
-#define TRUE 1
 #define FALSE 0
+#define TRUE 1
 
-// 定义最大包长 防止IP层分片
-#define MAX_DLEN 1380 	// 最大包内数据长度
-#define MAX_LEN 1400 	// 最大包长度
+/* 单个 TCP 报文的数据和总长度上限，避免 IP 层分片。 */
+#define MAX_DLEN 1380
+#define MAX_LEN 1400
 
-// TCP socket 状态定义
+/* TCP 连接状态。 */
 #define CLOSED 0
 #define LISTEN 1
 #define SYN_SENT 2
@@ -53,45 +44,55 @@
 #define LAST_ACK 9
 #define TIME_WAIT 10
 
-// TCP 拥塞控制状态
+/* 第二阶段暂不实现拥塞控制，仅保留状态常量供后续阶段使用。 */
 #define SLOW_START 0
 #define CONGESTION_AVOIDANCE 1
 #define FAST_RECOVERY 2
 
-// TCP 发送窗口大小
-// #define TCP_SENDWN_SIZE (3200 * MAX_DLEN)
 #define TCP_SENDWN_SIZE (32 * SMSS)
+#define TCP_RECVWN_SIZE (32 * SMSS)
 
-// TCP 接受窗口大小
-// #define TCP_RECVWN_SIZE (3200 * MAX_DLEN) // 比如最多放32个满载数据包
-#define TCP_RECVWN_SIZE (32 * SMSS) // 比如最多放32个满载数据包
-
-// TCP 发送窗口
+/*
+ * 发送窗口。
+ *
+ * base_seq 指向最早已发送但尚未累计确认的字节，next_seq 指向下一个
+ * 尚未发送的字节。二者之差就是当前 FlightSize。
+ */
 typedef struct {
-	uint16_t window_size;  // 窗口大小
-  	uint32_t base_seq;     // 已经发送出去，但是没有ACK的首个Seq
-	uint32_t next_seq;     // 仍未发送出去，但是准备发送的首个Seq
-	struct timeval send_time;  // 发送时间戳
-  	struct timeval timeout;  // 记录发送出去，但是没有ACK的全部数据的超时时间
-  	int ack_cnt;	
-	int has_rtt_sample;  // 是否采集到RTT样本
+	uint16_t window_size;        /* 对端最近通告的接收窗口 rwnd。 */
+	uint32_t base_seq;           /* 最早未确认序列号。 */
+	uint32_t next_seq;           /* 下一个待发送序列号。 */
 
-	// uint32_t estmated_rtt;
-  	// uint16_t rwnd;
-  	// int congestion_status;
-  	// uint16_t cwnd;
-  	// uint16_t ssthresh;
+	struct timeval send_time;    /* 保留字段；当前 RTT 计时使用 rtt_send_time。 */
+	struct timeval timeout;      /* 下次使用 setitimer 的间隔。 */
+	int ack_cnt;                 /* 连续重复 ACK 数。 */
+
+	/* RFC 6298 RTT/RTO 状态，单位均为微秒。 */
+	int has_rtt_sample;
+	uint64_t srtt_us;
+	uint64_t rttvar_us;
+	uint64_t rto_us;
+	uint64_t current_rto_us;
+	uint64_t last_rtt_sample_time_us;
+	struct timeval rtt_send_time;
+	uint32_t rtt_seq;
+	int rtt_sample_pending;
+	int rtt_retransmitted;
+
+	int data_timer_active;        /* 最早未确认数据定时器是否运行。 */
+	int zero_window_timer_active; /* 零窗口探测定时器是否运行。 */
 } sender_window_t;
 
-// TCP 接收窗口
+/*
+ * 接收窗口。
+ *
+ * expect_seq 是接收端下一个期望的字节序号。last_advertised_window 用于
+ * 接收端 SWS 避免：窗口从 0 恢复时，必须先达到可接收阈值才重新通告。
+ */
 typedef struct {
-	uint16_t window_size; // 窗口大小
-	uint32_t expect_seq;  // 接收方内核下一个想要接收的Seq
-
-	// char received[TCP_RECVWN_SIZE];
-	// received_packet_t* head;
-	// char buf[TCP_RECVWN_SIZE];
-	// uint8_t marked[TCP_RECVWN_SIZE];
+	uint16_t window_size;
+	uint32_t expect_seq;
+	uint16_t last_advertised_window;
 } receiver_window_t;
 
 typedef struct {
@@ -99,51 +100,58 @@ typedef struct {
 	uint16_t port;
 } tju_sock_addr;
 
+/*
+ * 发送缓冲区采用环形数组。
+ *
+ * base 指向最早未确认数据，next 指向下一个待发送数据，store 指向应用
+ * 下一次写入位置；count 表示缓冲区中尚未确认的总字节数。
+ */
 typedef struct {
-    pthread_mutex_t lock; // 发送数据锁
-	char* mem; // 发送数据缓存区
-	int capacity; // 发送数据缓存容量
-    int base;  // 内核在缓冲区重传旧数据处
-    int next;  // 内核在缓冲区发送新数据处
-    int store;  // 用户在缓冲区中存放新数据处
-    int count;
-    pthread_cond_t cond;
-}send_buf_t;
+	pthread_mutex_t lock;
+	pthread_cond_t cond;
+	char* mem;
+	int capacity;
+	int base;
+	int next;
+	int store;
+	int count;
+} send_buf_t;
+
+/*
+ * 接收缓冲区只保存已经按序到达的数据。head 指向应用下一次读取位置，
+ * expect 指向内核下一次写入位置，count 为尚未被应用读取的字节数。
+ */
+typedef struct {
+	pthread_mutex_t lock;
+	pthread_cond_t cond;
+	char* mem;
+	int capacity;
+	int head;
+	int expect;
+	int count;
+} recv_buf_t;
 
 typedef struct {
-    pthread_mutex_t lock; // 接收缓冲区数据锁
-	char* mem; // 接收数据缓存区
-	int capacity; // 接收数据缓存容量
-	int head;    // 用户下一个读入位置
-    int expect;  // 内核在缓冲区存放新数据处
-    int count;   // 缓冲区中尚未被用户读取的字节数
-    pthread_cond_t cond;
-}recv_buf_t;
+	int state;
+	int close_requested;
+	pthread_mutex_t state_lock;
 
-typedef struct {
-	int state; // TCP的状态
-	pthread_mutex_t state_lock;  // 用于防止用户线程和后台内核线程竞争
+	uint32_t local_isn;
+	uint32_t remote_isn;
+	uint32_t local_fin_seq;
+	uint32_t remote_fin_seq;
 
-	uint32_t local_isn;  // 本地初始序号
-	uint32_t remote_isn;  // 远程初始序号
-	uint32_t local_fin_seq;  // 本地发FIN时的Seq
-	uint32_t remote_fin_seq; // 远程发FIN时的Seq
-
-	tju_sock_addr bind_addr; // 存放bind和listen时该socket绑定的IP和端口
-	tju_sock_addr established_local_addr; // 存放建立连接后 本机的 IP和端口
-	tju_sock_addr established_remote_addr; // 存放建立连接后 连接对方的 IP和端口
+	tju_sock_addr bind_addr;
+	tju_sock_addr established_local_addr;
+	tju_sock_addr established_remote_addr;
 
 	send_buf_t* send_buf;
 	recv_buf_t* recv_buf;
-
 	sender_window_t* send_wnd;
 	receiver_window_t* recv_wnd;
 
 	pthread_t send_thread_id;
 	pthread_t retry_thread_id;
-
 } tju_tcp_t;
-
-
 
 #endif

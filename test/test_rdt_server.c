@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
 
     tju_tcp_t* new_conn = tju_accept(my_server);
 
-    sleep_no_wake(8);
+    sleep_no_wake(90);
 
     int alllen = 0;
     int print_s = 0;
@@ -88,7 +88,11 @@ int main(int argc, char **argv) {
     size_t ret = fwrite(allbuf, sizeof(char), sizeof(allbuf), wfile);
     fclose(wfile);
 
-    sleep_no_wake(100);
+
+    sleep(10);
+    tju_close(my_server);
+
+    // sleep_no_wake(100);
     
     return EXIT_SUCCESS;
 }
