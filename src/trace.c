@@ -103,6 +103,8 @@ void trace_recv(uint32_t seq, uint32_t ack, uint8_t flags, uint32_t length){
 
 void trace_cwnd(int type, uint32_t size){
     char info[TRACE_INFO_SIZE];
+
+    /* 保持课程规定的 type:%d size:%d 格式。 */
     snprintf(info, sizeof(info), "type:%d size:%u", type, size);
     trace_write("CWND", info);
 }

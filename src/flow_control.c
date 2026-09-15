@@ -3,51 +3,53 @@
 #include "tju_tcp.h"
 
 static uint32_t receive_sws_threshold(tju_tcp_t* sock){
-    uint32_t half_buffer = (uint32_t)sock->recv_buf->capacity / 2;
-    return (half_buffer < SMSS)? half_buffer: (uint32_t)SMSS;
+    uint32_t half_buffer_capacity = (uint32_t)sock->receive_buffer->capacity / 2;
+    return (half_buffer_capacity < SMSS)? half_buffer_capacity: (uint32_t)SMSS;
 }
 
 uint32_t flow_receive_available_locked(tju_tcp_t* sock){
-    int available = sock->recv_buf->capacity - sock->recv_buf->count;
-    return (available > 0)? (uint32_t)available: 0;
+    int available_bytes =
+        sock->receive_buffer->capacity - sock->receive_buffer->buffered_bytes;
+    return (available_bytes > 0)? (uint32_t)available_bytes: 0;
 }
 
 uint16_t flow_advertised_window_locked(tju_tcp_t* sock){
-    receiver_window_t* wnd = sock->recv_wnd;
-    uint32_t available = flow_receive_available_locked(sock);
-    uint16_t advertised;
+    receive_window_t* receive_window = sock->receive_window;
+    uint32_t available_bytes = flow_receive_available_locked(sock);
+    uint16_t advertised_window;
 
-    if(available == 0){
-        wnd->last_advertised_window = 0;
-        wnd->window_size = 0;
+    if(available_bytes == 0){
+        receive_window->last_advertised_window = 0;
+        receive_window->advertised_window = 0;
         return 0;
     }
 
-    if(wnd->last_advertised_window == 0 &&
-       available < receive_sws_threshold(sock)){
-        wnd->window_size = 0;
+    if(receive_window->last_advertised_window == 0 &&
+       available_bytes < receive_sws_threshold(sock)){
+        receive_window->advertised_window = 0;
         return 0;
     }
 
-    advertised = (available > UINT16_MAX)?
-                 (uint16_t)UINT16_MAX: (uint16_t)available;
-    wnd->last_advertised_window = advertised;
-    wnd->window_size = advertised;
-    return advertised;
+    advertised_window = (available_bytes > UINT16_MAX)?
+                 (uint16_t)UINT16_MAX: (uint16_t)available_bytes;
+    receive_window->last_advertised_window = advertised_window;
+    receive_window->advertised_window = advertised_window;
+    return advertised_window;
 }
 
 uint16_t flow_advertised_window(tju_tcp_t* sock){
-    uint16_t window;
+    uint16_t advertised_window;
 
-    pthread_mutex_lock(&(sock->recv_buf->lock));
-    window = flow_advertised_window_locked(sock);
-    pthread_mutex_unlock(&(sock->recv_buf->lock));
-    return window;
+    pthread_mutex_lock(&(sock->receive_buffer->lock));
+    advertised_window = flow_advertised_window_locked(sock);
+    pthread_mutex_unlock(&(sock->receive_buffer->lock));
+    return advertised_window;
 }
 
-int flow_should_defer_small_segment(int outstanding, int unsent){
-    if(unsent <= 0 || unsent >= SMSS){
+int flow_should_defer_small_segment(uint32_t flight_size,
+                                    uint32_t unsent_bytes){
+    if(unsent_bytes == 0 || unsent_bytes >= SMSS){
         return FALSE;
     }
-    return outstanding > 0;
+    return flight_size > 0;
 }

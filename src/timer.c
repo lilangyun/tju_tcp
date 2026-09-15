@@ -1,104 +1,104 @@
 #include "timer.h"
 
-volatile sig_atomic_t retry[RETRY_FLAG_NUM] = {0};
+volatile sig_atomic_t retransmission_pending[RETRY_FLAG_NUM] = {0};
 
-static void (*timeout_check[RETRY_FLAG_NUM])(int) = {
+static void (*timeout_handlers[RETRY_FLAG_NUM])(int) = {
     NULL,
-    syn_timeout_check,
-    synack_timeout_check,
-    fin_timeout_check,
-    finack_timeout_check,
-    data_timeout_check,
-    zero_window_timeout_check,
+    handle_syn_timeout,
+    handle_synack_timeout,
+    handle_fin_timeout,
+    handle_finack_timeout,
+    handle_data_timeout,
+    handle_zero_window_timeout,
 };
 
-void set_timeout(tju_tcp_t* sock, int re_num){
+void timer_arm_event(tju_tcp_t* sock, int retransmission_event){
     struct itimerval timer = {0};
 
-    signal(SIGALRM, timeout_check[re_num]);
-    retry[re_num] = 0;
-    timer.it_value = sock->send_wnd->timeout;
+    signal(SIGALRM, timeout_handlers[retransmission_event]);
+    retransmission_pending[retransmission_event] = 0;
+    timer.it_value = sock->send_window->retransmit_timeout;
     setitimer(ITIMER_REAL, &timer, NULL);
 }
 
-void stop_timeout(int re_num){
+void timer_cancel_event(int retransmission_event){
     struct itimerval timer = {0};
 
-    retry[re_num] = 0;
+    retransmission_pending[retransmission_event] = 0;
     setitimer(ITIMER_REAL, &timer, NULL);
 }
 
-void timer_state_init(sender_window_t* wnd){
-    wnd->data_timer_active = FALSE;
-    wnd->zero_window_timer_active = FALSE;
+void timer_state_reset(send_window_t* send_window){
+    send_window->data_retransmission_timer_active = FALSE;
+    send_window->zero_window_probe_timer_active = FALSE;
 }
 
-void timer_arm_data(tju_tcp_t* sock){
-    sender_window_t* wnd = sock->send_wnd;
+void timer_arm_data_retransmission(tju_tcp_t* sock){
+    send_window_t* send_window = sock->send_window;
 
-    wnd->timeout.tv_sec = (time_t)(wnd->current_rto_us / 1000000ULL);
-    wnd->timeout.tv_usec = (suseconds_t)(wnd->current_rto_us % 1000000ULL);
-    wnd->data_timer_active = TRUE;
-    set_timeout(sock, DATA_RETRY);
+    send_window->retransmit_timeout.tv_sec = (time_t)(send_window->effective_rto_us / 1000000ULL);
+    send_window->retransmit_timeout.tv_usec = (suseconds_t)(send_window->effective_rto_us % 1000000ULL);
+    send_window->data_retransmission_timer_active = TRUE;
+    timer_arm_event(sock, DATA_RETRY);
 }
 
-void timer_stop_data(tju_tcp_t* sock){
-    sock->send_wnd->data_timer_active = FALSE;
-    stop_timeout(DATA_RETRY);
+void timer_cancel_data_retransmission(tju_tcp_t* sock){
+    sock->send_window->data_retransmission_timer_active = FALSE;
+    timer_cancel_event(DATA_RETRY);
 }
 
-void timer_arm_zero_window(tju_tcp_t* sock){
-    sender_window_t* wnd = sock->send_wnd;
+void timer_arm_zero_window_probe(tju_tcp_t* sock){
+    send_window_t* send_window = sock->send_window;
 
-    if(wnd->zero_window_timer_active){
+    if(send_window->zero_window_probe_timer_active){
         return;
     }
 
-    wnd->timeout.tv_sec = (time_t)(wnd->current_rto_us / 1000000ULL);
-    wnd->timeout.tv_usec = (suseconds_t)(wnd->current_rto_us % 1000000ULL);
-    wnd->zero_window_timer_active = TRUE;
-    set_timeout(sock, ZERO_WINDOW_RETRY);
+    send_window->retransmit_timeout.tv_sec = (time_t)(send_window->effective_rto_us / 1000000ULL);
+    send_window->retransmit_timeout.tv_usec = (suseconds_t)(send_window->effective_rto_us % 1000000ULL);
+    send_window->zero_window_probe_timer_active = TRUE;
+    timer_arm_event(sock, ZERO_WINDOW_RETRY);
 }
 
-void timer_cancel_zero_window(tju_tcp_t* sock){
-    if(!sock->send_wnd->zero_window_timer_active){
+void timer_cancel_zero_window_probe(tju_tcp_t* sock){
+    if(!sock->send_window->zero_window_probe_timer_active){
         return;
     }
 
-    sock->send_wnd->zero_window_timer_active = FALSE;
-    stop_timeout(ZERO_WINDOW_RETRY);
+    sock->send_window->zero_window_probe_timer_active = FALSE;
+    timer_cancel_event(ZERO_WINDOW_RETRY);
 }
 
-int timer_zero_window_active(const sender_window_t* wnd){
-    return wnd->zero_window_timer_active;
+int timer_zero_window_probe_active(const send_window_t* send_window){
+    return send_window->zero_window_probe_timer_active;
 }
 
-void syn_timeout_check(int signal){
+void handle_syn_timeout(int signal){
     (void)signal;
-    retry[SYN_RETRY] = 1;
+    retransmission_pending[SYN_RETRY] = 1;
 }
 
-void synack_timeout_check(int signal){
+void handle_synack_timeout(int signal){
     (void)signal;
-    retry[SYNACK_RETRY] = 1;
+    retransmission_pending[SYNACK_RETRY] = 1;
 }
 
-void fin_timeout_check(int signal){
+void handle_fin_timeout(int signal){
     (void)signal;
-    retry[FIN_RETRY] = 1;
+    retransmission_pending[FIN_RETRY] = 1;
 }
 
-void finack_timeout_check(int signal){
+void handle_finack_timeout(int signal){
     (void)signal;
-    retry[FINACK_RETRY] = 1;
+    retransmission_pending[FINACK_RETRY] = 1;
 }
 
-void data_timeout_check(int signal){
+void handle_data_timeout(int signal){
     (void)signal;
-    retry[DATA_RETRY] = 1;
+    retransmission_pending[DATA_RETRY] = 1;
 }
 
-void zero_window_timeout_check(int signal){
+void handle_zero_window_timeout(int signal){
     (void)signal;
-    retry[ZERO_WINDOW_RETRY] = 1;
+    retransmission_pending[ZERO_WINDOW_RETRY] = 1;
 }

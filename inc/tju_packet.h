@@ -45,17 +45,17 @@ typedef struct {
  构造tju_packet_t
  返回其指针
  */
-tju_packet_t* create_packet(uint16_t src, uint16_t dst, uint32_t seq, 
-    uint32_t ack, uint16_t hlen, uint16_t plen, uint8_t flags, 
-    uint16_t adv_window, uint8_t ext, char* data, int len);
+tju_packet_t* create_packet(uint16_t src, uint16_t dst, uint32_t seq,
+    uint32_t ack, uint16_t hlen, uint16_t plen, uint8_t flags,
+    uint16_t advertised_window, uint8_t ext, char* data, int len);
 
 /*
  输入header所有字段 和 TCP包数据内容及其长度
- 构造tju_packet_t 
+ 构造tju_packet_t
  返回其对应的字符串
  */
 char* create_packet_buf(uint16_t src, uint16_t dst, uint32_t seq, uint32_t ack,
-    uint16_t hlen, uint16_t plen, uint8_t flags, uint16_t adv_window, 
+    uint16_t hlen, uint16_t plen, uint8_t flags, uint16_t advertised_window,
     uint8_t ext, char* data, int len);
 
 /*
@@ -67,7 +67,7 @@ void free_packet(tju_packet_t* packet);
  下面的函数全部都是从一个packet的字符串中
  根据各个字段的偏移量
  找到并返回对应的字段
-*/ 
+*/
 uint16_t get_src(char* msg);
 uint16_t get_dst(char* msg);
 uint32_t get_seq(char* msg);
@@ -82,7 +82,7 @@ uint8_t get_ext(char* msg);
 /*############################################## 下面是实现上面函数功能的辅助函数 用户没必要调用 ##############################################*/
 char* packet_to_buf(tju_packet_t* packet);
 char* header_in_char(uint16_t src, uint16_t dst, uint32_t seq, uint32_t ack,
-    uint16_t hlen, uint16_t plen, uint8_t flags, uint16_t adv_window, 
+    uint16_t hlen, uint16_t plen, uint8_t flags, uint16_t advertised_window,
     uint8_t ext);
 
 #endif

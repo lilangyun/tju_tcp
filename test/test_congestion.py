@@ -12,23 +12,23 @@ TEST_PASS = 'vagrant'
 EXITING = False
 
 # 输入 带宽 延迟 丢包率
-rate = 100 
+rate = 100
 delay = 300
 delay_distro = 50
 loss = 10
 if len(sys.argv)>=2:
-    rate = int(sys.argv[1])  
+    rate = int(sys.argv[1])
     delay = int(sys.argv[2])
     delay_distro = int(sys.argv[3])
     loss = int(sys.argv[4])
-print("\n即将使用如下网络状态进行数据传输: rate:%dMbps delay:%dms delay-distro:%d loss:%d%% \n"%(rate, delay, delay_distro, loss)) 
+print("\n即将使用如下网络状态进行数据传输: rate:%dMbps delay:%dms delay-distro:%d loss:%d%% \n"%(rate, delay, delay_distro, loss))
 
 def my_exit(signum, frame):
     global EXITING
     if EXITING==True:
         print('\n正在退出测试程序, 请稍等, 不需要多次停止\n')
         return
-        
+
     EXITING = True
     print('\n正在退出测试程序, 请稍等\n')
     with Connection(host="172.17.0.3", user=TEST_USER, connect_kwargs={'password':TEST_PASS}) as conn:
@@ -37,7 +37,7 @@ def my_exit(signum, frame):
         rst = conn.run(stop_tcpdump_cmd, timeout=10)
         if (rst.failed):
             print('[退出测试] 这里为什么会出错')
-        
+
         print("[退出测试] 结束客户端和服务端进程运行")
         stop_server_cmd = 'sudo pkill -f "/vagrant/tju_tcp/test/rdt_server"'
         stop_client_cmd = 'sudo pkill -f "/vagrant/tju_tcp/test/rdt_client"'
@@ -46,19 +46,19 @@ def my_exit(signum, frame):
             if (rst.failed):
                 print("[退出测试] 关闭本地测试程序失败")
         except Exception as e:
-            pass 
+            pass
         try:
             rst = conn.run(stop_server_cmd)
             if (rst.failed):
-                print("[退出测试] 关闭服务端测试程序失败")            
-        except Exception as e: 
-            pass 
-        
-        print("[退出测试] 重置网络环境")    
+                print("[退出测试] 关闭服务端测试程序失败")
+        except Exception as e:
+            pass
+
+        print("[退出测试] 重置网络环境")
         reset_networf_cmd = 'sudo tcset enp0s8 --rate 100Mbps --delay 20ms --overwrite'
         rst = conn.run(reset_networf_cmd)
         if (rst.failed):
-            print("[退出测试程序] 重置服务端网络失败")    
+            print("[退出测试程序] 重置服务端网络失败")
         rst = conn.local(reset_networf_cmd)
         if (rst.failed):
             print("[退出测试程序] 重置客户端网络失败")
@@ -66,19 +66,19 @@ def my_exit(signum, frame):
     exit()
 
 def main():
-    
+
     if socket.gethostname() == "server":
         print("只能在client端运行自动测试")
         exit()
 
     signal.signal(signal.SIGINT, my_exit)
     signal.signal(signal.SIGTERM, my_exit)
-        
+
     print("====================================================================")
     print("============================开始测试================================")
     print("====================================================================")
     with Connection(host="172.17.0.3", user=TEST_USER, connect_kwargs={'password':TEST_PASS}) as conn:
-        
+
         # 编译提交的源码
         print("[自动测试] 编译提交源码")
         print("> cd /vagrant/tju_tcp && make")
@@ -88,7 +88,7 @@ def main():
             print('{"scores": {"establish_connection": 0}}')
             exit()
         print("")
-        
+
         # 判断是否使用用户提交的新Makefile
         if os.path.exists("/vagrant/tju_tcp/test_Makefile"):
             print("[自动测试] 检测到用户提供了自己的测试Makefile, 使用用户的测试Makefile替换自带的版本")
@@ -106,7 +106,7 @@ def main():
         if (rst.failed):
             print('[自动测试] 编译测试源码错误 停止测试')
             print('{"scores": {"establish_connection": 0}}')
-            exit()    
+            exit()
         print("")
 
 
@@ -117,7 +117,7 @@ def main():
         rst = conn.run(stop_tcpdump_cmd, timeout=10)
         if (rst.failed):
             print('[抓包并绘图] 这里为什么会出错')
-        
+
         # 保证没有之前的客户端和服务端进程运行
         stop_server_cmd = 'sudo pkill -f "/vagrant/tju_tcp/test/rdt_server"'
         stop_client_cmd = 'sudo pkill -f "/vagrant/tju_tcp/test/rdt_client"'
@@ -126,16 +126,16 @@ def main():
             if (rst.failed):
                 print("[抓包并绘图] 关闭本地测试程序失败")
         except Exception as e:
-            pass 
+            pass
         try:
             rst = conn.run(stop_server_cmd)
             if (rst.failed):
-                print("[抓包并绘图] 关闭服务端测试程序失败")            
-        except Exception as e: 
-            pass 
+                print("[抓包并绘图] 关闭服务端测试程序失败")
+        except Exception as e:
+            pass
 
         # 保证建立连接的网络环境
-        reset_networf_cmd = 'sudo tcset enp0s8 --rate 100Mbps --delay 20ms --overwrite' 
+        reset_networf_cmd = 'sudo tcset enp0s8 --rate 100Mbps --delay 20ms --overwrite'
         conn.run(reset_networf_cmd)
         if (rst.failed):
             print("[数据传输测试] 重置服务端网络失败")
@@ -149,12 +149,12 @@ def main():
         if (rst.failed):
             print('[抓包并绘图] 清理上一次的抓包结果错误')
             exit()
-        
+
 
 
         # 进行数据传输前，先开始抓包
         print("[抓包并绘图] 开始在服务端抓包")
-        start_tcpdump_cmd = "sudo tcpdump -i enp0s8 -w /home/vagrant/server.pcap udp > /dev/null 2> /dev/null < /dev/null & " 
+        start_tcpdump_cmd = "sudo tcpdump -i enp0s8 -w /home/vagrant/server.pcap udp > /dev/null 2> /dev/null < /dev/null & "
         # > /dev/null 忽略命令正常执行的输出; 2> /dev/null 忽略错误输出; < /dev/null 避免脚本等待输入; & 设置进程为后台进程
         rst = conn.run(start_tcpdump_cmd, timeout=10)
         if (rst.failed):
@@ -176,11 +176,11 @@ def main():
         if (rst.failed):
             print("[抓包并绘图] 无法运行客户端测试程序")
             exit()
-        
+
         # 等待建立连接
         print("[抓包并绘图] 等待6s建立连接")
         time.sleep(6)
-        
+
         # 连接建立 模拟网络延迟 丢包
         set_networf_cmd = 'sudo tcset enp0s8 --rate %dMbps --delay %dms --delay-distro %d --loss %d%% --overwrite'%(rate, delay, delay_distro, loss)
         print("[抓包并绘图] 建立连接后  设置双方的网络通讯速率 丢包率 和延迟: %s"%set_networf_cmd)
@@ -196,7 +196,7 @@ def main():
         # 等待60s的数据传输
         print("[抓包并绘图] 等待60s 进行双方通信")
         time.sleep(60)
-        
+
         # 停止抓包
         print("[抓包并绘图] 停止抓包")
         stop_tcpdump_cmd = 'sudo pkill -f "tcpdump -i enp0s8 -w /home/vagrant/server.pcap udp"'
@@ -213,13 +213,13 @@ def main():
             if (rst.failed):
                 print("[抓包并绘图] 关闭本地测试程序失败")
         except Exception as e:
-            pass 
+            pass
         try:
             rst = conn.run(stop_server_cmd)
             if (rst.failed):
-                print("[抓包并绘图] 关闭服务端测试程序失败")            
-        except Exception as e: 
-            pass 
+                print("[抓包并绘图] 关闭服务端测试程序失败")
+        except Exception as e:
+            pass
 
         # 取消延迟 丢包等网络配置
         print("[抓包并绘图] 取消网络设置")
@@ -239,7 +239,17 @@ def main():
             print("[抓包并绘图] 绘图失败")
             exit()
 
+        for trace_file in ("client.event.trace", "server.event.trace"):
+            gen_win_cmd = (
+                "cd /vagrant/tju_tcp/test && "
+                "python3 ./gen_graph_win.py ./%s" % trace_file
+            )
+            rst = conn.run(gen_win_cmd)
+            if (rst.failed):
+                print("[抓包并绘图] 窗口绘图失败")
+                exit()
+
 
 if __name__ == "__main__":
     main()
-        
+

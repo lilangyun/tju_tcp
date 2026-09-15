@@ -9,8 +9,8 @@
 
 /* 单个报文最大数据长度；收发缓冲区按说明书的 5000 * SMSS 下限设置。 */
 #define SMSS MAX_DLEN
-#define RECV_BUF_SIZE (5000 * SMSS)
-#define SEND_BUF_SIZE (5000 * SMSS)
+#define RECEIVE_BUFFER_SIZE (5000 * SMSS)
+#define SEND_BUFFER_SIZE (5000 * SMSS)
 
 #define SEQ_BIT_WIDTH 32
 #define SEQ_MAX (uint32_t)(((uint64_t)1 << SEQ_BIT_WIDTH) - 1)
