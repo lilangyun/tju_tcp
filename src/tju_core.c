@@ -15,14 +15,95 @@ static int send_control_packet(tju_tcp_t* sock, uint8_t flags, uint32_t seq_num,
                       uint32_t ack_num);
 static void free_sock(tju_tcp_t* sock);
 static void init_windows(tju_tcp_t* sock);
+static void init_buffers(tju_tcp_t* sock);
 static void* send_thread(void* arg);
 static void* retransmission_thread(void* arg);
 static void retransmit_oldest_segment_locked(tju_tcp_t* sock);
+static int receive_bitmap_test(const receive_buffer_t* receive_buffer,
+                               uint32_t index);
+static void receive_bitmap_set(receive_buffer_t* receive_buffer,
+                               uint32_t index);
+static void receive_bitmap_clear(receive_buffer_t* receive_buffer,
+                                 uint32_t index);
+static uint32_t flush_contiguous_receive_data_locked(tju_tcp_t* sock);
+static void store_receive_segment_locked(tju_tcp_t* sock,
+                                        uint32_t sequence_offset,
+                                        const char* data,
+                                        uint32_t data_length);
 
 static int send_control_packet(tju_tcp_t* sock, uint8_t flags, uint32_t seq_num,
-                      uint32_t ack_num){
+                               uint32_t ack_num){
     return send_control_packet_with_advertised_window(sock, flags, seq_num, ack_num,
                                   flow_advertised_window(sock));
+}
+
+static int receive_bitmap_test(const receive_buffer_t* receive_buffer,
+                               uint32_t index){
+    uint32_t byte_index = index / 8U;
+    uint8_t bit_mask = (uint8_t)(1U << (index % 8U));
+
+    return (receive_buffer->received_bitmap[byte_index] & bit_mask) != 0;
+}
+
+static void receive_bitmap_set(receive_buffer_t* receive_buffer,
+                               uint32_t index){
+    uint32_t byte_index = index / 8U;
+    uint8_t bit_mask = (uint8_t)(1U << (index % 8U));
+
+    receive_buffer->received_bitmap[byte_index] |= bit_mask;
+}
+
+static void receive_bitmap_clear(receive_buffer_t* receive_buffer,
+                                 uint32_t index){
+    uint32_t byte_index = index / 8U;
+    uint8_t bit_mask = (uint8_t)(1U << (index % 8U));
+
+    receive_buffer->received_bitmap[byte_index] &=
+        (uint8_t)~bit_mask;
+}
+
+static uint32_t flush_contiguous_receive_data_locked(tju_tcp_t* sock){
+    receive_buffer_t* receive_buffer = sock->receive_buffer;
+    uint32_t delivered_bytes = 0;
+
+    /* bitmap 中连续的 bit 表示累计 ACK 可以推进，清除后数据转为可读。 */
+    while(receive_bitmap_test(receive_buffer,
+                              (uint32_t)receive_buffer->next_expected_index)){
+        receive_bitmap_clear(receive_buffer,
+                             (uint32_t)receive_buffer->next_expected_index);
+        receive_buffer->next_expected_index =
+            (receive_buffer->next_expected_index + 1) % receive_buffer->capacity;
+        sock->receive_window->next_expected_seq++;
+        receive_buffer->buffered_bytes++;
+        delivered_bytes++;
+    }
+
+    return delivered_bytes;
+}
+
+static void store_receive_segment_locked(tju_tcp_t* sock,
+                                        uint32_t sequence_offset,
+                                        const char* data,
+                                        uint32_t data_length){
+    receive_buffer_t* receive_buffer = sock->receive_buffer;
+    uint32_t index;
+    uint32_t offset;
+    uint32_t buffer_index;
+
+    /* 乱序数据按序列号偏移写入环形缓冲区，并使用 bitmap 去重。 */
+    for(index = 0; index < data_length; index++){
+        offset = sequence_offset + index;
+        buffer_index = ((uint32_t)receive_buffer->next_expected_index + offset) %
+                       (uint32_t)receive_buffer->capacity;
+
+        if(receive_bitmap_test(receive_buffer, buffer_index)){
+            continue;
+        }
+
+        receive_buffer->mem[buffer_index] = data[index];
+        receive_bitmap_set(receive_buffer, buffer_index);
+        receive_buffer->reserved_bytes++;
+    }
 }
 
 /* ============================ 规定 socket API ============================ */
@@ -40,24 +121,7 @@ tju_tcp_t* tju_core_socket(void){
     sock->state = CLOSED;
     sock->close_requested = FALSE;
 
-    sock->send_buffer = (send_buffer_t*)malloc(sizeof(send_buffer_t));
-    pthread_mutex_init(&(sock->send_buffer->lock), NULL);
-    pthread_cond_init(&(sock->send_buffer->cond), NULL);
-    sock->send_buffer->mem = (char*)(malloc(SEND_BUFFER_SIZE * sizeof(char)));
-    sock->send_buffer->capacity = SEND_BUFFER_SIZE;
-    sock->send_buffer->ack_base_index = 0;
-    sock->send_buffer->send_next_index = 0;
-    sock->send_buffer->write_index = 0;
-    sock->send_buffer->unacked_bytes = 0;  // 当前未ACK的总数量
-
-    sock->receive_buffer = (receive_buffer_t*)malloc(sizeof(receive_buffer_t));
-    pthread_mutex_init(&(sock->receive_buffer->lock), NULL);
-    pthread_cond_init(&(sock->receive_buffer->cond), NULL);
-    sock->receive_buffer->mem = (char*)(malloc(RECEIVE_BUFFER_SIZE * sizeof(char)));
-    sock->receive_buffer->capacity = RECEIVE_BUFFER_SIZE;
-    sock->receive_buffer->read_index = 0;
-    sock->receive_buffer->write_index = 0;
-    sock->receive_buffer->buffered_bytes = 0;  // 应用尚未读取的字节数
+    init_buffers(sock);
 
     return sock;
 }
@@ -303,6 +367,7 @@ int tju_core_recv(tju_tcp_t* sock, void *buffer, int len){
     // 推进接收缓冲区读取位置。
     sock->receive_buffer->read_index = (sock->receive_buffer->read_index + bytes_read) % buffer_capacity;
     sock->receive_buffer->buffered_bytes -= bytes_read;
+    sock->receive_buffer->reserved_bytes -= (uint32_t)bytes_read;
     pthread_cond_broadcast(&(sock->receive_buffer->cond));
     new_advertised_window = flow_advertised_window_locked(sock);
     trace_rwnd(new_advertised_window);
@@ -356,6 +421,7 @@ int tju_core_handle_packet(tju_tcp_t* sock, char* pkt){
         // 新建socket: new_conn
         tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
         memcpy(new_conn, sock, sizeof(tju_tcp_t));
+        init_buffers(new_conn);
         new_conn->established_local_addr.port = local_addr.port; // 随机分配端口
         new_conn->established_local_addr.ip = local_addr.ip;
         new_conn->established_remote_addr = remote_addr;
@@ -609,7 +675,8 @@ int tju_core_handle_packet(tju_tcp_t* sock, char* pkt){
 
         // 推进发送缓冲区确认基址和发送窗口左边界。
         if(acked_bytes > 0){
-            rtt_update_from_ack(sock, base_seq);
+            /* 在移动 base_seq 前判断该累计 ACK 是否覆盖当前测量报文。 */
+            rtt_update_from_ack(sock, ack_num);
 
             /* 新 ACK 推进拥塞窗口；恢复阶段的类型为拥塞避免。 */
             int cwnd_event_type =
@@ -631,12 +698,6 @@ int tju_core_handle_packet(tju_tcp_t* sock, char* pkt){
             }
             else{
                 /* 仍有未确认数据时，以最新 ACK 时刻重置定时器。 */
-                if(rtt_can_start_measurement(sock)){
-                    rtt_start_measurement(sock);
-                }
-                else{
-                    rtt_reset_measurement(sock->send_window);
-                }
                 timer_arm_data_retransmission(sock);
             }
         }
@@ -668,12 +729,12 @@ int tju_core_handle_packet(tju_tcp_t* sock, char* pkt){
     while(pthread_mutex_lock(&(sock->receive_buffer->lock)) != 0); // 加锁
 
     // 只接收当前通告窗口允许的数据。
-    uint32_t buffer_capacity = sock->receive_buffer->capacity;
-    int recv_write_index = sock->receive_buffer->write_index;
     uint32_t expected_seq = sock->receive_window->next_expected_seq;
     uint16_t advertised_window = flow_advertised_window_locked(sock);
     uint32_t accepted_bytes = data_len;
     uint32_t segment_offset = 0;
+    uint32_t delivered_bytes = 0;
+    uint32_t ack_to_send;
 
     if(accepted_bytes == 0){
         pthread_mutex_unlock(&(sock->receive_buffer->lock)); // 解锁
@@ -681,53 +742,46 @@ int tju_core_handle_packet(tju_tcp_t* sock, char* pkt){
     }
 
     int32_t sequence_delta = (int32_t)(seq_num - expected_seq);
-    if(sequence_delta > 0){
-        pthread_mutex_unlock(&(sock->receive_buffer->lock)); // 解锁
-        // 发送Duplicate-SACK
-        send_control_packet_with_advertised_window(sock, ACK_FLAG_MASK, sock->send_window->next_seq,
-                               expected_seq, advertised_window);
-        return 0;
-    }
     if(sequence_delta < 0){
         segment_offset = (uint32_t)(-sequence_delta);
         if(segment_offset >= accepted_bytes){
-            pthread_mutex_unlock(&(sock->receive_buffer->lock));
-            send_control_packet_with_advertised_window(sock, ACK_FLAG_MASK, sock->send_window->next_seq,
-                                   expected_seq, advertised_window);
-            return 0;
+            accepted_bytes = 0;
         }
-        accepted_bytes -= segment_offset;
+        else{
+            accepted_bytes -= segment_offset;
+            sequence_delta = 0;
+        }
     }
 
-    if(accepted_bytes > advertised_window){
-        pthread_mutex_unlock(&(sock->receive_buffer->lock));
-        send_control_packet_with_advertised_window(sock, ACK_FLAG_MASK, sock->send_window->next_seq,
-                               expected_seq, advertised_window);
-        return 0;
-    }
+    if(accepted_bytes > 0 && advertised_window > 0 &&
+       (uint32_t)sequence_delta < advertised_window){
+        uint32_t window_remaining =
+            (uint32_t)advertised_window - (uint32_t)sequence_delta;
 
-    if(recv_write_index + accepted_bytes <= buffer_capacity){
-        memcpy(sock->receive_buffer->mem + recv_write_index,
-               pkt + DEFAULT_HEADER_LEN + segment_offset, accepted_bytes);
+        if(accepted_bytes > window_remaining){
+            accepted_bytes = window_remaining;
+        }
     }
     else{
-        int first_part_bytes = buffer_capacity - recv_write_index;
-        int second_part_bytes = accepted_bytes - first_part_bytes;
-        memcpy(sock->receive_buffer->mem + recv_write_index,
-               pkt + DEFAULT_HEADER_LEN + segment_offset, first_part_bytes);
-        memcpy(sock->receive_buffer->mem,
-               pkt + DEFAULT_HEADER_LEN + segment_offset + first_part_bytes, second_part_bytes);
+        accepted_bytes = 0;
     }
 
-    // 回送累计 ACK，确认号为本端下一个期望字节。
-    sock->receive_window->next_expected_seq = expected_seq + accepted_bytes;
-    sock->receive_buffer->write_index = (recv_write_index + accepted_bytes) % buffer_capacity;  // 将来接收数据在缓冲区中的下标
-    sock->receive_buffer->buffered_bytes += accepted_bytes;
-    trace_deliver(expected_seq, accepted_bytes);
-    pthread_cond_broadcast(&(sock->receive_buffer->cond));
+    if(accepted_bytes > 0){
+        store_receive_segment_locked(sock, (uint32_t)sequence_delta,
+                                     pkt + DEFAULT_HEADER_LEN + segment_offset,
+                                     accepted_bytes);
+        delivered_bytes = flush_contiguous_receive_data_locked(sock);
+
+        if(delivered_bytes > 0){
+            trace_deliver(expected_seq, delivered_bytes);
+            pthread_cond_broadcast(&(sock->receive_buffer->cond));
+        }
+    }
+
+    // 无论是否补齐缺口，都回送当前累计确认点和最新窗口。
     advertised_window = flow_advertised_window_locked(sock);
     trace_rwnd(advertised_window);
-    uint32_t ack_to_send = sock->receive_window->next_expected_seq;
+    ack_to_send = sock->receive_window->next_expected_seq;
     // 注意：此处不能 timer_cancel_event(DATA_RETRY) —— 全局itimer被所有通道共用，
     // 双向传输时收到数据会误杀本端发送方向的重传定时器
     pthread_mutex_unlock(&(sock->receive_buffer->lock)); // 解锁
@@ -918,11 +972,8 @@ static void* send_thread(void* arg){
         unsent_bytes = (uint32_t)sock->send_buffer->unacked_bytes - flight_size;
         usable_window_remaining = (usable_window > flight_size)?
                            (usable_window - flight_size): 0U;
-        sendable_bytes = (usable_window_remaining < unsent_bytes)?
-                         usable_window_remaining: unsent_bytes;
-        if(flow_should_defer_small_segment(flight_size, unsent_bytes)){
-            sendable_bytes = 0;
-        }
+        sendable_bytes = flow_limited_sendable_bytes(flight_size, unsent_bytes,
+                                                     usable_window_remaining);
 
         if(sendable_bytes > 0){
             timer_cancel_zero_window_probe(sock);
@@ -935,6 +986,11 @@ static void* send_thread(void* arg){
         while(remaining_bytes > 0){
             /* SMSS约束 */
             segment_size = (remaining_bytes < SMSS)? remaining_bytes: SMSS;
+
+            /* 只在实际发送新数据时启动测量，避免从 ACK 时刻伪造发送时间。 */
+            if(!sock->send_window->rtt_measurement_pending){
+                rtt_start_measurement(sock, current_seq, (uint32_t)segment_size);
+            }
 
             /* 从缓冲区中取数据 */
             if(segment_size != 0 &&
@@ -982,7 +1038,6 @@ static void* send_thread(void* arg){
         }
 
         if(sendable_bytes > 0 && sock->send_window->base_seq == seq_num){
-            rtt_start_measurement(sock);
             timer_arm_data_retransmission(sock);
         }
 
@@ -1035,7 +1090,6 @@ static int send_zero_window_probe_locked(tju_tcp_t* sock){
     send_window->next_seq = seq_num + 1;
     sock->send_buffer->send_next_index = (sock->send_buffer->send_next_index + 1) % sock->send_buffer->capacity;
     rtt_reset_measurement(send_window);
-    rtt_mark_retransmitted(sock);
     timer_arm_data_retransmission(sock);
     pthread_cond_broadcast(&(sock->send_buffer->cond));
     return 1;
@@ -1135,11 +1189,14 @@ static void free_sock(tju_tcp_t* sock){
     free(sock->send_window);
     pthread_cond_destroy(&(sock->send_buffer->cond));
     pthread_mutex_destroy(&(sock->send_buffer->lock));
+    free(sock->send_buffer);
 
     free(sock->receive_buffer->mem);
+    free(sock->receive_buffer->received_bitmap);
     free(sock->receive_window);
     pthread_cond_destroy(&(sock->receive_buffer->cond));
     pthread_mutex_destroy(&(sock->receive_buffer->lock));
+    free(sock->receive_buffer);
 
     pthread_mutex_destroy(&(sock->state_lock));
 
@@ -1147,6 +1204,39 @@ static void free_sock(tju_tcp_t* sock){
 
     destroy_half_conn_queue(hashval);
     destroy_full_conn_queue(hashval);
+}
+
+static void init_buffers(tju_tcp_t* sock){
+    int receive_bitmap_size;
+
+    sock->send_buffer = (send_buffer_t*)malloc(sizeof(send_buffer_t));
+    pthread_mutex_init(&(sock->send_buffer->lock), NULL);
+    pthread_cond_init(&(sock->send_buffer->cond), NULL);
+    sock->send_buffer->mem = (char*)malloc(SEND_BUFFER_SIZE * sizeof(char));
+    sock->send_buffer->capacity = SEND_BUFFER_SIZE;
+    sock->send_buffer->ack_base_index = 0;
+    sock->send_buffer->send_next_index = 0;
+    sock->send_buffer->write_index = 0;
+    sock->send_buffer->unacked_bytes = 0;
+
+    sock->receive_buffer = (receive_buffer_t*)malloc(sizeof(receive_buffer_t));
+    pthread_mutex_init(&(sock->receive_buffer->lock), NULL);
+    pthread_cond_init(&(sock->receive_buffer->cond), NULL);
+    sock->receive_buffer->mem =
+        (char*)malloc(RECEIVE_BUFFER_SIZE * sizeof(char));
+    sock->receive_buffer->capacity = RECEIVE_BUFFER_SIZE;
+    receive_bitmap_size = (RECEIVE_BUFFER_SIZE + 7) / 8;
+    sock->receive_buffer->received_bitmap =
+        (uint8_t*)calloc((size_t)receive_bitmap_size, sizeof(uint8_t));
+    if(sock->receive_buffer->received_bitmap == NULL){
+        perror("calloc receive buffer bitmap");
+        exit(-1);
+    }
+    sock->receive_buffer->received_bitmap_size = receive_bitmap_size;
+    sock->receive_buffer->read_index = 0;
+    sock->receive_buffer->next_expected_index = 0;
+    sock->receive_buffer->buffered_bytes = 0;
+    sock->receive_buffer->reserved_bytes = 0;
 }
 
 // 初始化窗口
@@ -1170,9 +1260,12 @@ static void init_windows(tju_tcp_t* sock){
     sock->receive_window->advertised_window = UINT16_MAX;
     sock->receive_window->next_expected_seq = sock->remote_isn + 1;
     sock->receive_window->last_advertised_window = UINT16_MAX;
-    sock->receive_buffer->write_index = 0;
+    memset(sock->receive_buffer->received_bitmap, 0,
+           (size_t)sock->receive_buffer->received_bitmap_size);
     sock->receive_buffer->read_index = 0;
+    sock->receive_buffer->next_expected_index = 0;
     sock->receive_buffer->buffered_bytes = 0;
+    sock->receive_buffer->reserved_bytes = 0;
     trace_rwnd(flow_advertised_window_locked(sock));
 }
 
@@ -1197,7 +1290,7 @@ static void retransmit_oldest_segment_locked(tju_tcp_t* sock){
         retransmit_bytes = SMSS;
     }
 
-    rtt_mark_retransmitted(sock);
+    rtt_mark_retransmitted(sock, seq_num, retransmit_bytes);
 
     data = (char*)malloc(retransmit_bytes);
     if(buffer_offset + retransmit_bytes <= (uint32_t)buffer_capacity){

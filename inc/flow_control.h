@@ -6,6 +6,9 @@
 uint32_t flow_receive_available_locked(tju_tcp_t* sock);
 uint16_t flow_advertised_window_locked(tju_tcp_t* sock);
 uint16_t flow_advertised_window(tju_tcp_t* sock);
-int flow_should_defer_small_segment(uint32_t flight_size, uint32_t unsent_bytes);
+/* 返回本轮允许发送的新数据字节数，并执行发送端 SWS 避免。 */
+uint32_t flow_limited_sendable_bytes(uint32_t flight_size,
+                                     uint32_t unsent_bytes,
+                                     uint32_t window_allowed_bytes);
 
 #endif

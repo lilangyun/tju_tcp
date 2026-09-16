@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
 
     tju_tcp_t* new_conn = tju_accept(my_server);
 
-    sleep_no_wake(90);
+    sleep_no_wake(8);
 
     int alllen = 0;
     int print_s = 0;

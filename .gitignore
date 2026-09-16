@@ -11,3 +11,4 @@ design.md
 
 # 代码压缩包
 *.zip
+.repo_memory/

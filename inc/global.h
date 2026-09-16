@@ -78,9 +78,9 @@ typedef struct {
 	uint64_t rttvar_us;                    /* RTT 偏差，微秒。 */
 	uint64_t estimated_rto_us;             /* RFC 6298 估算的 RTO。 */
 	uint64_t effective_rto_us;             /* 退避后实际定时使用的 RTO。 */
-	uint64_t last_rtt_sample_time_us;      /* 最近一次有效采样时刻。 */
 	struct timeval rtt_send_time;          /* 当前 RTT 测量起始时刻。 */
-	uint32_t rtt_measurement_seq;          /* 当前测量对应报文序号。 */
+	uint32_t rtt_measurement_seq;          /* 当前测量报文的起始序号。 */
+	uint32_t rtt_measurement_end_seq;      /* 当前测量报文的结束序号，不含该值。 */
 	int rtt_measurement_pending;           /* 是否有 RTT 测量尚未完成。 */
 	int rtt_measurement_retransmitted;     /* Karn 算法使用的重传标记。 */
 
@@ -123,8 +123,10 @@ typedef struct {
 } send_buffer_t;
 
 /*
- * 接收缓冲区只保存已经按序到达的数据。read_index 指向应用下一次读取位置，
- * write_index 指向内核下一次写入位置，buffered_bytes 为尚未读取的字节数。
+ * 接收缓冲区通过 bitmap 记录窗口内已到达的字节。read_index 指向应用下一次
+ * 读取位置，next_expected_index 对应累计 ACK 指向的缓冲区位置。
+ * buffered_bytes 为已经连续、可供应用读取的字节数；reserved_bytes 为连续
+ * 数据和乱序缓存占用的总字节数。
  */
 typedef struct {
 	pthread_mutex_t lock;
@@ -132,8 +134,11 @@ typedef struct {
 	char* mem;
 	int capacity;
 	int read_index;
-	int write_index;
+	int next_expected_index;
 	int buffered_bytes;
+	uint32_t reserved_bytes;       /* 连续数据和乱序缓存的已占用字节数。 */
+	uint8_t* received_bitmap;      /* 每个字节一位，标记是否已经缓存。 */
+	int received_bitmap_size;      /* bitmap 字节数。 */
 } receive_buffer_t;
 
 typedef struct {
