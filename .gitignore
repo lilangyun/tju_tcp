@@ -1,4 +1,14 @@
+# 临时文件
 build/
 
+# 可执行文件
 client
 server
+
+# 个人文档
+log.md
+design.md
+
+# 代码压缩包
+*.zip
+.repo_memory/

@@ -7,15 +7,21 @@ CC=gcc
 FLAGS = -pthread -g -ggdb -DDEBUG -I$(INC_DIR)
 OBJS = $(BUILD_DIR)/tju_packet.o \
 	   $(BUILD_DIR)/kernel.o \
-	   $(BUILD_DIR)/tju_tcp.o 
-
+	   $(BUILD_DIR)/queue.o \
+	   $(BUILD_DIR)/timer.o \
+	   $(BUILD_DIR)/rtt.o \
+	   $(BUILD_DIR)/flow_control.o \
+	   $(BUILD_DIR)/congestion_control.o \
+	   $(BUILD_DIR)/trace.o \
+	   $(BUILD_DIR)/tju_core.o \
+	   $(BUILD_DIR)/tju_tcp.o
 
 
 default:all
 
 all: clean server client
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c 
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(FLAGS) -c -o $@ $<
 
 clean:
@@ -24,9 +30,9 @@ clean:
 server: $(OBJS)
 	$(CC) $(FLAGS) ./src/server.c -o server $(OBJS)
 
-client:
-	$(CC) $(FLAGS) ./src/client.c -o client $(OBJS) 
+client: $(OBJS)
+	$(CC) $(FLAGS) ./src/client.c -o client $(OBJS)
 
 
 
-	
+

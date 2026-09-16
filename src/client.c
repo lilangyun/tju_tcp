@@ -32,12 +32,14 @@ int main(int argc, char **argv) {
     tju_send(my_socket, "hello world", 12);
     tju_send(my_socket, "hello tju", 10);
 
-    char buf[2021];
-    tju_recv(my_socket, (void*)buf, 12);
-    printf("client recv %s\n", buf);
+    char buf[2021]; int rst;
+    rst = tju_recv(my_socket, (void*)buf, 12);
+    printf("client recv %s, rst = %d.\n", buf, rst);
 
-    tju_recv(my_socket, (void*)buf, 10);
-    printf("client recv %s\n", buf);
+    rst = tju_recv(my_socket, (void*)buf, 10);
+    printf("client recv %s, rst = %d.\n", buf, rst);
+
+    tju_close(my_socket);
 
     return EXIT_SUCCESS;
 }

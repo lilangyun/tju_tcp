@@ -88,7 +88,11 @@ int main(int argc, char **argv) {
     size_t ret = fwrite(allbuf, sizeof(char), sizeof(allbuf), wfile);
     fclose(wfile);
 
-    sleep_no_wake(100);
+
+    sleep(10);
+    tju_close(my_server);
+
+    // sleep_no_wake(100);
     
     return EXIT_SUCCESS;
 }

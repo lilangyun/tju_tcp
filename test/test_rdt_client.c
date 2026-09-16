@@ -61,8 +61,11 @@ int main(int argc, char **argv) {
     }
 
     free(file_buf);
+
+    sleep(20);
+    tju_close(my_socket);
         
-    sleep_no_wake(100);
+    // sleep_no_wake(100);
 
     return EXIT_SUCCESS;
 }

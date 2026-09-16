@@ -6,9 +6,9 @@
  构造tju_packet_t
  返回其指针
  */
-tju_packet_t* create_packet(uint16_t src, uint16_t dst, uint32_t seq, 
-    uint32_t ack, uint16_t hlen, uint16_t plen, uint8_t flags, 
-    uint16_t adv_window, uint8_t ext, char* data, int len){
+tju_packet_t* create_packet(uint16_t src, uint16_t dst, uint32_t seq,
+    uint32_t ack, uint16_t hlen, uint16_t plen, uint8_t flags,
+    uint16_t advertised_window, uint8_t ext, char* data, int len){
 
     tju_packet_t* new = malloc(sizeof(tju_packet_t));
 
@@ -19,7 +19,7 @@ tju_packet_t* create_packet(uint16_t src, uint16_t dst, uint32_t seq,
     new->header.hlen = hlen;
     new->header.plen = plen;
     new->header.flags = flags;
-    new->header.advertised_window = adv_window;
+    new->header.advertised_window = advertised_window;
     new->header.ext = ext;
 
     if(len > 0){
@@ -28,23 +28,23 @@ tju_packet_t* create_packet(uint16_t src, uint16_t dst, uint32_t seq,
     }else{
         new->data = NULL;
     }
-        
+
     return new;
 }
 
 /*
  输入header所有字段 和 TCP包数据内容及其长度
- 构造tju_packet_t 
+ 构造tju_packet_t
  返回其对应的字符串
  */
 char* create_packet_buf(uint16_t src, uint16_t dst, uint32_t seq, uint32_t ack,
-    uint16_t hlen, uint16_t plen, uint8_t flags, uint16_t adv_window, 
+    uint16_t hlen, uint16_t plen, uint8_t flags, uint16_t advertised_window,
     uint8_t ext, char* data, int len){
 
     tju_packet_t* temp;
-    char* final;  
+    char* final;
 
-    temp = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window, 
+    temp = create_packet(src, dst, seq, ack, hlen, plen, flags, advertised_window,
         ext, data, len);
 
     final = packet_to_buf(temp);
@@ -67,7 +67,7 @@ void free_packet(tju_packet_t* packet){
  下面的函数全部都是从一个packet的字符串中
  根据各个字段的偏移量
  找到并返回对应的字段
-*/ 
+*/
 
 uint16_t get_src(char* msg){
     int offset = 0;
@@ -134,15 +134,15 @@ uint8_t get_ext(char* msg){
  构造并返回header的字符串
  */
 char* header_in_char(uint16_t src, uint16_t dst, uint32_t seq, uint32_t ack,
-    uint16_t hlen, uint16_t plen, uint8_t flags, uint16_t adv_window, 
+    uint16_t hlen, uint16_t plen, uint8_t flags, uint16_t advertised_window,
     uint8_t ext){
 
 	uint16_t temp16;
     uint32_t temp32;
-    
+
     char* msg = (char*) calloc(plen, sizeof(char));
     int index = 0;
-    
+
     temp16 = htons(src);
     memcpy(msg+index, &temp16, SIZE16);
     index += SIZE16;
@@ -158,7 +158,7 @@ char* header_in_char(uint16_t src, uint16_t dst, uint32_t seq, uint32_t ack,
     temp32 = htonl(ack);
     memcpy(msg+index, &temp32, SIZE32);
     index += SIZE32;
-    
+
     temp16 = htons(hlen);
     memcpy(msg+index, &temp16, SIZE16);
     index += SIZE16;
@@ -170,7 +170,7 @@ char* header_in_char(uint16_t src, uint16_t dst, uint32_t seq, uint32_t ack,
     memcpy(msg+index, &flags, SIZE8);
     index += SIZE8;
 
-    temp16 = htons(adv_window);
+    temp16 = htons(advertised_window);
     memcpy(msg+index, &temp16, SIZE16);
     index += SIZE16;
 
@@ -186,15 +186,15 @@ char* header_in_char(uint16_t src, uint16_t dst, uint32_t seq, uint32_t ack,
  构造并返回对应的字符串
  */
 char* packet_to_buf(tju_packet_t* p){
-    char* msg = header_in_char(p->header.source_port, p->header.destination_port, 
-        p->header.seq_num, p->header.ack_num, p->header.hlen, p->header.plen, 
-        p->header.flags, p->header.advertised_window, 
+    char* msg = header_in_char(p->header.source_port, p->header.destination_port,
+        p->header.seq_num, p->header.ack_num, p->header.hlen, p->header.plen,
+        p->header.flags, p->header.advertised_window,
         p->header.ext);
-    
+
     if(p->header.plen > p->header.hlen){
         memcpy(msg+(p->header.hlen), p->data, (p->header.plen - (p->header.hlen)));
     }
-        
+
 
     return msg;
 }
