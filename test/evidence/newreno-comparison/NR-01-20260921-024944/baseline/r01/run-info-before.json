@@ -1,0 +1,25 @@
+{
+  "variant": "baseline",
+  "scenario": "NR-01",
+  "scenario_parameters": {
+    "rate": 100,
+    "delay": 20,
+    "jitter": 0,
+    "loss": 3,
+    "window_seconds": 60
+  },
+  "run_id": "r01",
+  "started_at": "2026-09-21T02:49:44",
+  "hostname": "client",
+  "git_branch": "feat/newreno",
+  "git_commit": "e795851a163178a165ea259db5ad289ff0d39a70",
+  "git_status": "?? README.md\n?? test/pack_test.sh\n?? test/run_perf_sweep.py\n?? \"\\350\\256\\241\\347\\256\\227\\346\\234\\272\\347\\275\\221\\347\\273\\234\\345\\256\\236\\350\\267\\265\\350\\257\\276\\347\\250\\213\\346\\212\\245\\345\\221\\212-3024244573-\\346\\235\\216\\346\\257\\205\\350\\275\\251-\\347\\254\\254\\344\\270\\211\\351\\230\\266\\346\\256\\265.docx\"",
+  "source_sha256": {
+    "inc/global.h": "3f5dabf45b1b7a3e692efa328d8166376a4b6ebfe7e94490596c03a625c0cb5b",
+    "inc/congestion_control.h": "d4319569e0c9afb3a681a9b43cf5475c3920f5d93607593bb2db7b67158aaaf2",
+    "src/congestion_control.c": "2d2cf94eba1fc1d6feb07bc418d59ef9b70fb7520627c6a3f196d1dd0dc8a32e",
+    "src/tju_core.c": "ebf099c74806a9625bce3b2a3a71cc038b321c22319ae2778fa1b229962879ec",
+    "src/rtt.c": "dee40d22b3561b3cf1cf27bdc131d8da7b3de6825da1d3f2ccfbc8927965ded3",
+    "src/timer.c": "62603cd54c027f40c6ca2057686150314a38c6b6d53cf8ac2606e7582080ff71"
+  }
+}

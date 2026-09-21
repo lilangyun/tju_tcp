@@ -30,11 +30,16 @@ static uint32_t congestion_threshold(uint32_t flight_size){
     return (half_flight_size > minimum_ssthresh)? half_flight_size: minimum_ssthresh;
 }
 
+static int sequence_after_or_equal(uint32_t lhs, uint32_t rhs){
+    return (int32_t)(lhs - rhs) >= 0;
+}
+
 void congestion_init(send_window_t* send_window, uint16_t initial_ssthresh){
     send_window->cwnd = initial_cwnd_bytes();
     send_window->ssthresh = initial_ssthresh;
     send_window->congestion_state = SLOW_START;
-    send_window->fast_retransmit_ack_pending = FALSE;
+    send_window->in_fast_recovery = FALSE;
+    send_window->recover_seq = send_window->base_seq;
 }
 
 uint32_t congestion_effective_window(const send_window_t* send_window){
@@ -44,19 +49,44 @@ uint32_t congestion_effective_window(const send_window_t* send_window){
     return (rwnd < send_window->cwnd)? rwnd: send_window->cwnd;
 }
 
-void congestion_on_new_ack(send_window_t* send_window, uint32_t acknowledged_bytes){
+int congestion_ack_covers_recover(const send_window_t* send_window,
+                                  uint32_t acknowledged_seq){
+    return sequence_after_or_equal(acknowledged_seq, send_window->recover_seq);
+}
+
+congestion_ack_result_t congestion_on_new_ack(send_window_t* send_window,
+                                              uint32_t acknowledged_bytes,
+                                              uint32_t acknowledged_seq){
     uint32_t cwnd_increment;
 
     if(acknowledged_bytes == 0){
-        return;
+        return CONGESTION_ACK_NORMAL;
     }
 
-    /* 基础快速重传没有快速恢复阶段；首个新 ACK 后回到 ssthresh 并进入拥塞避免。 */
-    if(send_window->fast_retransmit_ack_pending){
-        send_window->cwnd = send_window->ssthresh;
-        send_window->congestion_state = CONGESTION_AVOIDANCE;
-        send_window->fast_retransmit_ack_pending = FALSE;
-        return;
+    if(send_window->in_fast_recovery){
+        if(congestion_ack_covers_recover(send_window, acknowledged_seq)){
+            /* Full ACK：覆盖 recover_seq 后退出快速恢复。 */
+            send_window->cwnd = send_window->ssthresh;
+            send_window->congestion_state = CONGESTION_AVOIDANCE;
+            send_window->in_fast_recovery = FALSE;
+            return CONGESTION_ACK_FULL_RECOVERY;
+        }
+
+        /* Partial ACK：按 RFC 6582 对窗口做部分 deflate。 */
+        if(send_window->cwnd > acknowledged_bytes){
+            send_window->cwnd -= acknowledged_bytes;
+        }
+        else{
+            send_window->cwnd = SMSS;
+        }
+        if(acknowledged_bytes >= SMSS){
+            send_window->cwnd = add_cwnd(send_window->cwnd, SMSS);
+        }
+        if(send_window->cwnd < SMSS){
+            send_window->cwnd = SMSS;
+        }
+        send_window->congestion_state = FAST_RECOVERY;
+        return CONGESTION_ACK_PARTIAL;
     }
 
     /* 慢启动：每个累计 ACK 最多增加一个 SMSS。 */
@@ -66,7 +96,7 @@ void congestion_on_new_ack(send_window_t* send_window, uint32_t acknowledged_byt
         send_window->congestion_state =
             (send_window->cwnd < send_window->ssthresh)? SLOW_START:
                                         CONGESTION_AVOIDANCE;
-        return;
+        return CONGESTION_ACK_NORMAL;
     }
 
     /* 加法增长：一个窗口内的增量之和约为一个 SMSS。 */
@@ -76,14 +106,28 @@ void congestion_on_new_ack(send_window_t* send_window, uint32_t acknowledged_byt
     }
     send_window->cwnd = add_cwnd(send_window->cwnd, cwnd_increment);
     send_window->congestion_state = CONGESTION_AVOIDANCE;
+    return CONGESTION_ACK_NORMAL;
 }
 
-void congestion_on_fast_retransmit(send_window_t* send_window, uint32_t flight_size){
-    /* 第三个重复 ACK：降低窗口，并等待首个推进累计确认点的 ACK。 */
+void congestion_on_duplicate_ack(send_window_t* send_window){
+    if(!send_window->in_fast_recovery){
+        return;
+    }
+
+    /* RFC 5681 步骤 4：快速恢复期间每个额外重复 ACK 膨胀一个 SMSS。 */
+    send_window->cwnd = add_cwnd(send_window->cwnd, SMSS);
+    send_window->congestion_state = FAST_RECOVERY;
+}
+
+void congestion_on_fast_retransmit(send_window_t* send_window,
+                                   uint32_t flight_size,
+                                   uint32_t recover_seq){
+    /* RFC 5681/6582：进入快速恢复，窗口设置为 ssthresh + 3*SMSS。 */
     send_window->ssthresh = congestion_threshold(flight_size);
-    send_window->cwnd = SMSS;
-    send_window->congestion_state = SLOW_START;
-    send_window->fast_retransmit_ack_pending = TRUE;
+    send_window->cwnd = add_cwnd(send_window->ssthresh, 3U * SMSS);
+    send_window->congestion_state = FAST_RECOVERY;
+    send_window->recover_seq = recover_seq;
+    send_window->in_fast_recovery = TRUE;
 }
 
 void congestion_on_timeout(send_window_t* send_window, uint32_t flight_size){
@@ -91,5 +135,6 @@ void congestion_on_timeout(send_window_t* send_window, uint32_t flight_size){
     send_window->ssthresh = congestion_threshold(flight_size);
     send_window->cwnd = SMSS;
     send_window->congestion_state = SLOW_START;
-    send_window->fast_retransmit_ack_pending = FALSE;
+    send_window->recover_seq = send_window->next_seq;
+    send_window->in_fast_recovery = FALSE;
 }

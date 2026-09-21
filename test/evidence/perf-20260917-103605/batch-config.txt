@@ -1,0 +1,55 @@
+批次目录: /vagrant/tju_tcp/test/evidence/perf-20260917-103605
+生成时间: 2026-09-17 10:36:05
+编排脚本: /vagrant/tju_tcp/test/run_perf_sweep.py
+运行器: /vagrant/tju_tcp/test/test_congestion.py（未修改）
+带宽: 100 Mbps
+抖动: 0 ms
+观测窗口: 55 s
+重复次数: 3
+最大重试: 1
+实验选择: all
+丢包率水平(A): [0, 1, 3, 5]
+时延水平(B): [20, 50, 100, 200]
+A 固定时延: 20 ms
+B 固定丢包: 1%
+tcset 部署: Client 与 Server 两端（由 test_congestion.py 完成）
+
+条件列表:
+  A-delay20ms-loss0pct rate=100 delay=20 jitter=0 loss=0
+  A-delay20ms-loss1pct rate=100 delay=20 jitter=0 loss=1
+  A-delay20ms-loss3pct rate=100 delay=20 jitter=0 loss=3
+  A-delay20ms-loss5pct rate=100 delay=20 jitter=0 loss=5
+  B-delay20ms-loss1pct rate=100 delay=20 jitter=0 loss=1
+  B-delay50ms-loss1pct rate=100 delay=50 jitter=0 loss=1
+  B-delay100ms-loss1pct rate=100 delay=100 jitter=0 loss=1
+  B-delay200ms-loss1pct rate=100 delay=200 jitter=0 loss=1
+
+执行顺序:
+  r1 A-delay20ms-loss0pct
+  r1 A-delay20ms-loss1pct
+  r1 A-delay20ms-loss3pct
+  r1 A-delay20ms-loss5pct
+  r1 B-delay20ms-loss1pct
+  r1 B-delay50ms-loss1pct
+  r1 B-delay100ms-loss1pct
+  r1 B-delay200ms-loss1pct
+  r2 A-delay20ms-loss0pct
+  r2 A-delay20ms-loss1pct
+  r2 A-delay20ms-loss3pct
+  r2 A-delay20ms-loss5pct
+  r2 B-delay20ms-loss1pct
+  r2 B-delay50ms-loss1pct
+  r2 B-delay100ms-loss1pct
+  r2 B-delay200ms-loss1pct
+  r3 A-delay20ms-loss0pct
+  r3 A-delay20ms-loss1pct
+  r3 A-delay20ms-loss3pct
+  r3 A-delay20ms-loss5pct
+  r3 B-delay20ms-loss1pct
+  r3 B-delay50ms-loss1pct
+  r3 B-delay100ms-loss1pct
+  r3 B-delay200ms-loss1pct
+
+Git commit: 23e7b6326a8b84c16f2256188560b45d1f456796
+Client 时间: 1789641365.698455996
+Server 时间: 1789641368.091785963

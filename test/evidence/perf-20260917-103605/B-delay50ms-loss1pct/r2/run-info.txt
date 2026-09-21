@@ -1,0 +1,25 @@
+条件: B-delay50ms-loss1pct
+实验: B
+带宽: 100 Mbps
+单向时延: 50 ms
+抖动: 0 ms
+丢包率: 1%
+重复: r2
+尝试次数: 1
+返回码: 0
+运行耗时: 141.659 s
+是否超时: False
+有效: True
+吞吐率口径: window
+吞吐率: 0.877379 Mbps
+窗口口径: 0.877379 Mbps
+完成时间口径: 0.840311 Mbps
+窗口内交付字节: 6031980
+总交付字节: 7467180
+窗口是否完整覆盖: True
+是否提前完成: False
+快速重传(type:2): 33
+RTO(type:3): 3
+说明: 
+归档目录: /vagrant/tju_tcp/test/evidence/perf-20260917-103605/B-delay50ms-loss1pct/r2
+归档文件: client.event.trace,server.event.trace,client.log,server.log,server_Throuput.png

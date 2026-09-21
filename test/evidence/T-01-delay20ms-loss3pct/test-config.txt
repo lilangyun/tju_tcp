@@ -1,0 +1,11 @@
+测试编号: T-01
+测试日期: 2026-09-16
+代码版本: 23e7b63
+测试命令: sudo tcset enp0s8 --delay 20ms --loss 3% --overwrite; ./rdt_server; ./rdt_client
+网络参数: 时延 20 ms，丢包率 3%
+测试流程: 先设置网络，再启动 Server，最后启动 Client
+数据开始时间: 连接后约 8 s
+Trace记录时长: 约 77.2 s
+原始Trace: client.event.trace, server.event.trace
+抓包文件: 本次本地目录未归档 server.pcap；运行时位于 Server VM 的 /home/vagrant/server.pcap
+说明: 本目录保留与同一轮测试对应的原始Trace和生成图片，用于报告7.4节证据追踪。

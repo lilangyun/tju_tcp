@@ -1,0 +1,30 @@
+*
+!.gitignore
+
+# 测试程序源代码
+!*.c
+
+# 测试数据文件
+!*.txt
+
+# 构建脚本
+!Makefile
+
+# 打包脚本
+!*.sh
+
+# 绘图脚本
+!*.py
+
+# 报告证据：保留 Trace、抓包、指标、配置和图表，不提交运行日志
+!evidence/
+!evidence/**/
+!evidence/**/*.trace
+!evidence/**/*.pcap
+!evidence/**/*.json
+!evidence/**/*.csv
+!evidence/**/*.md
+!evidence/**/*.png
+!evidence/**/*.svg
+!evidence/**/*.txt
+evidence/**/*.log

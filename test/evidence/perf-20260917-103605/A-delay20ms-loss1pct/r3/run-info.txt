@@ -1,0 +1,25 @@
+条件: A-delay20ms-loss1pct
+实验: A
+带宽: 100 Mbps
+单向时延: 20 ms
+抖动: 0 ms
+丢包率: 1%
+重复: r3
+尝试次数: 1
+返回码: 0
+运行耗时: 150.128 s
+是否超时: False
+有效: True
+吞吐率口径: window
+吞吐率: 1.023308 Mbps
+窗口口径: 1.023308 Mbps
+完成时间口径: 1.033886 Mbps
+窗口内交付字节: 7035240
+总交付字节: 9651720
+窗口是否完整覆盖: True
+是否提前完成: False
+快速重传(type:2): 36
+RTO(type:3): 6
+说明: 
+归档目录: /vagrant/tju_tcp/test/evidence/perf-20260917-103605/A-delay20ms-loss1pct/r3
+归档文件: client.event.trace,server.event.trace,client.log,server.log,server_Throuput.png
