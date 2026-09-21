@@ -4,7 +4,7 @@
 NewReno 与基础 Reno 的受控对比测试工具。
 
 该脚本不修改 test_congestion.py，只负责：
-1. 在同一个 R-02 网络场景中调用现有测试程序；
+1. 在同一个 NR-01 网络场景中调用现有测试程序；
 2. 按 baseline/newreno 归档原始 Trace、图片、日志和源码标识；
 3. 从 Trace 计算可比指标；
 4. 读取两组归档并生成 CSV、Markdown 和报告级对比图。
@@ -50,7 +50,7 @@ SERVER_PCAP = "/home/vagrant/server.pcap"
 SMSS = 1380
 TOTAL_SEND_BYTES = 5000 * 10000
 SCENARIOS = {
-    "R-02": {
+    "NR-01": {
         "rate": 100,
         "delay": 20,
         "jitter": 0,
@@ -140,7 +140,7 @@ def unique_batch_dir(explicit):
     if explicit:
         return Path(explicit).resolve()
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return EVIDENCE_ROOT / ("R-02-" + stamp)
+    return EVIDENCE_ROOT / ("NR-01-" + stamp)
 
 
 def parse_info(text):
@@ -402,11 +402,11 @@ def average_metrics(metric_files):
 
 def latest_batch_dir():
     candidates = sorted(
-        [path for path in EVIDENCE_ROOT.glob("R-02-*") if path.is_dir()],
+        [path for path in EVIDENCE_ROOT.glob("NR-01-*") if path.is_dir()],
         key=lambda path: path.stat().st_mtime,
     )
     if not candidates:
-        raise SystemExit("未找到 newreno-comparison/R-02-* 批次目录")
+        raise SystemExit("未找到 newreno-comparison/NR-01-* 批次目录")
     return candidates[-1]
 
 
@@ -487,7 +487,7 @@ def plot_comparison(batch_dir, baseline, newreno):
                       bar.get_height(),
                       fmt.format(value),
                       ha="center", va="bottom", fontsize=12)
-    fig.suptitle("R-02: Basic Reno vs NewReno", fontsize=19)
+    fig.suptitle("NR-01: Basic Reno vs NewReno", fontsize=19)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     comparison_dir = batch_dir / "comparison"
     comparison_dir.mkdir(parents=True, exist_ok=True)
@@ -521,9 +521,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="NewReno 对比实验工具")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    run_parser = subparsers.add_parser("run", help="采集一个版本的 R-02 数据")
+    run_parser = subparsers.add_parser("run", help="采集一个版本的 NR-01 数据")
     run_parser.add_argument("--variant", choices=("baseline", "newreno"), required=True)
-    run_parser.add_argument("--scenario", choices=tuple(SCENARIOS), default="R-02")
+    run_parser.add_argument("--scenario", choices=tuple(SCENARIOS), default="NR-01")
     run_parser.add_argument("--batch-dir", default=None,
                             help="批次目录；默认创建带时间戳的新目录")
     run_parser.add_argument("--run-id", default="r01")
@@ -532,7 +532,7 @@ def parse_args():
 
     compare_parser = subparsers.add_parser("compare", help="比较同一批次的两组数据")
     compare_parser.add_argument("--batch-dir", default=None,
-                                help="未指定时选择最新的 R-02-* 批次")
+                                help="未指定时选择最新的 NR-01-* 批次")
     compare_parser.set_defaults(func=command_compare)
     return parser.parse_args()
 
