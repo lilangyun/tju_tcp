@@ -8,6 +8,7 @@ server
 # 个人文档
 log.md
 design.md
+*.docx
 
 # 代码压缩包
 *.zip
