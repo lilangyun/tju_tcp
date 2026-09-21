@@ -231,18 +231,19 @@ python3 run_newreno_compare.py compare --batch-dir /vagrant/tju_tcp/test/evidenc
 
 ## 6. 打包脚本
 
-### 6.1 test/pack_test.sh（当前参考版）
+### 6.1 test/pack_test.sh（最终提交包）
 
 ```bash
 cd /vagrant/tju_tcp/test
 bash pack_test.sh
 ```
 
-当前脚本是早期参考版本，默认生成 `tju_tcp_package.zip`。最终提交包仍需补充 NR-01 evidence、更新 README 和明确日志排除规则后使用。
+脚本默认生成 `tju_tcp_package.zip`，固定纳入源码、测试脚本以及 T-01、性能实验和 NR-01 三组 evidence。打包时递归排除 `*.log`，并生成包含 Git 分支、提交号、标签和证据范围的 `PACKAGE-INFO.txt`。
 
 ```text
 tju_tcp/
 ├── README.md
+├── PACKAGE-INFO.txt
 ├── Makefile
 ├── inc/
 ├── src/
@@ -269,6 +270,7 @@ bash pack_test.sh --outdir /vagrant   # 指定输出目录
 
 - 当前选做分支：`stage-4`
 - v1.3 基础提交：`23e7b6326a8b84c16f2256188560b45d1f456796`
+- v1.4：RFC 6582 NewReno 选做实现、NR-01 对比证据与最终提交包
 - 环境：Vagrant `ubuntu/netproj`；Client `172.17.0.2`，Server `172.17.0.3`
 - 工具：gcc、make、Python 3、fabric、matplotlib、scapy、tcpdump、tc/tcconfig
 - 默认网络：100 Mbps、20 ms、无丢包；实验网络参数见 `test/evidence/perf-20260917-103605/batch-config.txt`

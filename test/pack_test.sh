@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # pack_test.sh
-# 将当前 tju_tcp 项目按现有目录结构打包为一个 zip。
+# 生成课程报告所需的 tju_tcp 提交包。
 #
 # 包内结构：
 #   tju_tcp/
 #   ├── README.md
+#   ├── PACKAGE-INFO.txt
 #   ├── Makefile
 #   ├── inc/
 #   ├── src/
@@ -17,7 +18,10 @@
 #       ├── pack_test.sh
 #       └── evidence/
 #           ├── T-01-delay20ms-loss3pct/
-#           └── perf-20260917-103605/
+#           ├── perf-20260917-103605/
+#           └── newreno-comparison/
+#
+# 不纳入 docs/、picture/、Word 报告、构建产物和 *.log 运行日志。
 #
 # 用法：
 #   cd /vagrant/tju_tcp/test
@@ -31,6 +35,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEST_DIR="$REPO_ROOT/test"
 T01_EVIDENCE="$TEST_DIR/evidence/T-01-delay20ms-loss3pct"
 PERF_EVIDENCE="$TEST_DIR/evidence/perf-20260917-103605"
+NR01_EVIDENCE="$TEST_DIR/evidence/newreno-comparison/NR-01-20260921-024944"
 OUT_DIR="$REPO_ROOT"
 
 while [[ $# -gt 0 ]]; do
@@ -72,6 +77,7 @@ echo "仓库根目录: $REPO_ROOT"
 echo "输出目录  : $OUT_DIR"
 echo "T-01 证据  : $T01_EVIDENCE"
 echo "perf 证据  : $PERF_EVIDENCE"
+echo "NR-01 证据 : $NR01_EVIDENCE"
 echo "=============================================="
 
 need_zip
@@ -84,6 +90,7 @@ require_path "$TEST_DIR/rdt_send_file.txt"
 require_path "$TEST_DIR/pack_test.sh"
 require_path "$T01_EVIDENCE"
 require_path "$PERF_EVIDENCE"
+require_path "$NR01_EVIDENCE"
 for pattern in "$TEST_DIR"/*.c "$TEST_DIR"/*.py; do
   require_path "$pattern"
 done
@@ -104,29 +111,25 @@ cp -a "$TEST_DIR/rdt_send_file.txt" "$PROJECT_DIR/test/"
 cp -a "$TEST_DIR/pack.sh" "$PROJECT_DIR/test/" 2>/dev/null || true
 cp -a "$TEST_DIR/pack_test.sh" "$PROJECT_DIR/test/"
 
-# staging：T-01 evidence
+# staging：报告证据
+# 复制全部非日志 evidence，保留 pcap、Trace、CSV/JSON、配置、图表和源码快照。
 mkdir -p "$PROJECT_DIR/test/evidence"
-cp -a "$T01_EVIDENCE" "$PROJECT_DIR/test/evidence/"
+cp -a "$TEST_DIR/evidence/." "$PROJECT_DIR/test/evidence/"
+find "$PROJECT_DIR/test/evidence" -type f -name '*.log' -delete
 
-# staging：perf evidence（只复制 trace、metrics、run-info、summary 与图表）
-PERF_DEST="$PROJECT_DIR/test/evidence/perf-20260917-103605"
-mkdir -p "$PERF_DEST"
-cp -a "$PERF_EVIDENCE"/*.txt "$PERF_DEST/" 2>/dev/null || true
-cp -a "$PERF_EVIDENCE"/*.csv "$PERF_DEST/" 2>/dev/null || true
-cp -a "$PERF_EVIDENCE"/*.png "$PERF_DEST/" 2>/dev/null || true
-for condition in "$PERF_EVIDENCE"/A-* "$PERF_EVIDENCE"/B-*; do
-  [[ -d "$condition" ]] || continue
-  for run in "$condition"/r*; do
-    [[ -d "$run" ]] || continue
-    dest="$PERF_DEST/$(basename "$condition")/$(basename "$run")"
-    mkdir -p "$dest"
-    for name in client.event.trace server.event.trace metrics.json run-info.txt; do
-      if [[ -e "$run/$name" ]]; then
-        cp -a "$run/$name" "$dest/"
-      fi
-    done
-  done
-done
+# staging：记录包对应的源码版本，便于报告证据与源码对照。
+GIT_BRANCH="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || echo unknown)"
+GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+GIT_DESCRIBE="$(git -C "$REPO_ROOT" describe --tags --always --dirty 2>/dev/null || echo unknown)"
+{
+  printf 'package=tju_tcp\n'
+  printf 'created_utc=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  printf 'git_branch=%s\n' "$GIT_BRANCH"
+  printf 'git_commit=%s\n' "$GIT_COMMIT"
+  printf 'git_describe=%s\n' "$GIT_DESCRIBE"
+  printf 'included_evidence=T-01-delay20ms-loss3pct, perf-20260917-103605, newreno-comparison/NR-01-20260921-024944\n'
+  printf 'excluded=docs, picture, Word reports, build products, *.log\n'
+} > "$PROJECT_DIR/PACKAGE-INFO.txt"
 
 # 生成项目包（zip 根目录为 tju_tcp/）
 (
