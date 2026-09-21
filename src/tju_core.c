@@ -678,12 +678,13 @@ int tju_core_handle_packet(tju_tcp_t* sock, char* pkt){
             /* 在移动 base_seq 前判断该累计 ACK 是否覆盖当前测量报文。 */
             rtt_update_from_ack(sock, ack_num);
 
-            /* 新 ACK 推进拥塞窗口；恢复阶段的类型为拥塞避免。 */
+            congestion_ack_result_t ack_result =
+                congestion_on_new_ack(sock->send_window, acked_bytes, ack_num);
             int cwnd_event_type =
-                (sock->send_window->fast_retransmit_ack_pending ||
-                 sock->send_window->cwnd >= sock->send_window->ssthresh)?
-                CONGESTION_AVOIDANCE: SLOW_START;
-            congestion_on_new_ack(sock->send_window, acked_bytes);
+                (ack_result == CONGESTION_ACK_PARTIAL)?
+                CONGESTION_FAST_RETRANSMIT:
+                ((sock->send_window->congestion_state == SLOW_START)?
+                 SLOW_START: CONGESTION_AVOIDANCE);
             trace_cwnd(cwnd_event_type, sock->send_window->cwnd);
             trace_swnd(congestion_effective_window(sock->send_window));
 
@@ -700,21 +701,40 @@ int tju_core_handle_packet(tju_tcp_t* sock, char* pkt){
                 /* 仍有未确认数据时，以最新 ACK 时刻重置定时器。 */
                 timer_arm_data_retransmission(sock);
             }
+
+            if(ack_result == CONGESTION_ACK_PARTIAL){
+                /* partial ACK：立即重传新的最早未确认报文，继续快速恢复。 */
+                retransmit_oldest_segment_locked(sock);
+                timer_arm_data_retransmission(sock);
+                pthread_cond_broadcast(&(sock->send_buffer->cond));
+            }
         }
         else if(ack_num == base_seq){
             if(base_seq != next_seq && sock->send_window->rwnd > 0){
-                sock->send_window->duplicate_ack_count++;
-            }
-            if(sock->send_window->duplicate_ack_count >= 3 &&
-               !sock->send_window->fast_retransmit_ack_pending){
-                // 三次重复 ACK：降低拥塞窗口并立即重传最早未确认数据。
-                congestion_on_fast_retransmit(sock->send_window, flight_size);
-                trace_cwnd(CONGESTION_FAST_RETRANSMIT,
-                           sock->send_window->cwnd);
-                trace_swnd(congestion_effective_window(sock->send_window));
-                retransmit_oldest_segment_locked(sock);
-                timer_arm_data_retransmission(sock);
-                sock->send_window->duplicate_ack_count = 0;
+                if(sock->send_window->in_fast_recovery){
+                    /* 额外重复 ACK：按 RFC 5681 膨胀 cwnd，不重复重传同一缺口。 */
+                    congestion_on_duplicate_ack(sock->send_window);
+                    trace_cwnd(CONGESTION_FAST_RETRANSMIT,
+                               sock->send_window->cwnd);
+                    trace_swnd(congestion_effective_window(sock->send_window));
+                    pthread_cond_broadcast(&(sock->send_buffer->cond));
+                }
+                else{
+                    sock->send_window->duplicate_ack_count++;
+                    if(sock->send_window->duplicate_ack_count >= 3 &&
+                       congestion_ack_covers_recover(sock->send_window, ack_num)){
+                        /* 第三个重复 ACK：记录 recover 并进入 NewReno 快速恢复。 */
+                        congestion_on_fast_retransmit(
+                            sock->send_window, flight_size,
+                            sock->send_window->next_seq);
+                        trace_cwnd(CONGESTION_FAST_RETRANSMIT,
+                                   sock->send_window->cwnd);
+                        trace_swnd(congestion_effective_window(sock->send_window));
+                        retransmit_oldest_segment_locked(sock);
+                        timer_arm_data_retransmission(sock);
+                        sock->send_window->duplicate_ack_count = 0;
+                    }
+                }
             }
         }
 

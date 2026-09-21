@@ -66,8 +66,9 @@ typedef struct {
 	/* RFC 5681 基础 Reno 状态，cwnd 和 ssthresh 的单位均为字节。 */
 	uint32_t cwnd;               /* 拥塞窗口，字节。 */
 	uint32_t ssthresh;           /* 慢启动阈值，字节。 */
-	int congestion_state;        /* SLOW_START 或 CONGESTION_AVOIDANCE。 */
-	int fast_retransmit_ack_pending; /* 等待快速重传后的首个新 ACK。 */
+	int congestion_state;        /* SLOW_START、CONGESTION_AVOIDANCE 或 FAST_RECOVERY。 */
+	int in_fast_recovery;        /* 是否处于 NewReno 快速恢复。 */
+	uint32_t recover_seq;        /* 快速恢复需要覆盖到的发送序号上界。 */
 
 	struct timeval retransmit_timeout; /* 下次重传定时器的间隔。 */
 	int duplicate_ack_count;           /* 连续重复 ACK 数。 */
