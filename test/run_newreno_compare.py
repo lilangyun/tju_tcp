@@ -146,7 +146,7 @@ def unique_batch_dir(explicit):
 def parse_info(text):
     fields = {}
     for key, value in INFO_RE.findall(text):
-        fields[key] = value
+        fields[key.strip()] = value
     return fields
 
 
@@ -193,6 +193,7 @@ def compute_metrics(client_trace, server_trace, window_seconds):
 
     unique_sequences = len(set(item[1] for item in data_sends))
     retransmission_copies = len(data_sends) - unique_sequences
+    first_data_send = min(item[0] for item in data_sends) if data_sends else None
 
     cwnd_types = {0: 0, 1: 0, 2: 0, 3: 0}
     for _, info in client["cwnd"]:
@@ -202,22 +203,33 @@ def compute_metrics(client_trace, server_trace, window_seconds):
 
     delivered_bytes = 0
     delivery_times = []
+    window_end = (
+        first_data_send + window_seconds * 1000000
+        if first_data_send is not None else None
+    )
     for timestamp, info in server["delv"]:
-        delivered_bytes += int(info.get("size", "0"))
+        if (first_data_send is None or window_end is None or
+                first_data_send <= timestamp < window_end):
+            delivered_bytes += int(info.get("size", "0"))
         delivery_times.append(timestamp)
 
     rtt_samples = [float(info["SampleRTT"]) for _, info in client["rtts"]
                    if "SampleRTT" in info]
     first_delivery = min(delivery_times) if delivery_times else None
     last_delivery = max(delivery_times) if delivery_times else None
-    active_seconds = (
+    trace_seconds = (
         (last_delivery - first_delivery) / 1000000.0
         if first_delivery is not None and last_delivery is not None
         else 0.0
     )
+    window_covered = (
+        last_delivery is not None and
+        first_data_send is not None and
+        last_delivery >= window_end
+    )
     average_throughput_mbps = (
-        delivered_bytes * 8 / active_seconds / 1000000.0
-        if active_seconds > 0 else 0.0
+        delivered_bytes * 8 / window_seconds / 1000000.0
+        if window_seconds > 0 else 0.0
     )
 
     return {
@@ -227,7 +239,8 @@ def compute_metrics(client_trace, server_trace, window_seconds):
         "retransmission_copies": retransmission_copies,
         "delivered_bytes": delivered_bytes,
         "completion_ratio": min(1.0, delivered_bytes / TOTAL_SEND_BYTES),
-        "active_seconds": active_seconds,
+        "trace_seconds": trace_seconds,
+        "window_covered": window_covered,
         "average_throughput_mbps": average_throughput_mbps,
         "cwnd_type_0_slow_start": cwnd_types[0],
         "cwnd_type_1_congestion_avoidance": cwnd_types[1],
@@ -517,6 +530,41 @@ def command_compare(args):
     log("对比图 SVG: %s" % svg_path)
 
 
+def command_recompute(args):
+    batch_dir = Path(args.batch_dir).resolve()
+    metric_files = sorted(batch_dir.glob("*/*/metrics.json"))
+    if not metric_files:
+        raise SystemExit("批次中没有可重算的 metrics.json")
+
+    updated = 0
+    for metrics_path in metric_files:
+        run_dir = metrics_path.parent
+        run_info_path = run_dir / "run-info.json"
+        if not run_info_path.exists():
+            continue
+        run_info = json.loads(run_info_path.read_text(encoding="utf-8"))
+        old_metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        scenario = run_info["scenario_parameters"]
+        metrics = compute_metrics(
+            run_dir / "client.event.trace",
+            run_dir / "server.event.trace",
+            int(scenario["window_seconds"]),
+        )
+        metrics["variant"] = old_metrics.get("variant", run_info.get("variant"))
+        metrics["scenario"] = old_metrics.get("scenario", run_info.get("scenario"))
+        metrics["copied_files"] = old_metrics.get("copied_files", [])
+        metrics["missing_files"] = old_metrics.get("missing_files", [])
+        write_json(metrics_path, metrics)
+        run_info["metrics"] = metrics
+        write_json(run_info_path, run_info)
+        updated += 1
+        log("已重算: %s" % metrics_path)
+
+    if updated == 0:
+        raise SystemExit("没有找到同时包含 Trace 和 run-info.json 的运行目录")
+    log("完成 %d 个运行目录的指标重算。" % updated)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="NewReno 对比实验工具")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -534,6 +582,11 @@ def parse_args():
     compare_parser.add_argument("--batch-dir", default=None,
                                 help="未指定时选择最新的 NR-01-* 批次")
     compare_parser.set_defaults(func=command_compare)
+
+    recompute_parser = subparsers.add_parser(
+        "recompute", help="仅根据已归档 Trace 重新计算 metrics.json")
+    recompute_parser.add_argument("--batch-dir", required=True)
+    recompute_parser.set_defaults(func=command_recompute)
     return parser.parse_args()
 
 
